@@ -57,9 +57,17 @@ func (s ProjectStore) UpdateNode(ctx context.Context, id string, input project.U
 		_ = json.Unmarshal(metadata, &current.Metadata)
 	}
 	if input.DocumentID != nil {
-		current.DocumentID = input.DocumentID
+		if strings.TrimSpace(*input.DocumentID) == "" {
+			current.DocumentID = nil
+		} else {
+			current.DocumentID = input.DocumentID
+		}
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE content_nodes SET title=?,position=?,metadata=?,document_id=?,updated_at=? WHERE id=?`, current.Title, current.Position, metadataJSON(current.Metadata), current.DocumentID, time.Now().UTC(), id)
+	var documentValue any
+	if current.DocumentID != nil {
+		documentValue = *current.DocumentID
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE content_nodes SET title=?,position=?,metadata=?,document_id=?,updated_at=? WHERE id=?`, current.Title, current.Position, metadataJSON(current.Metadata), documentValue, time.Now().UTC(), id)
 	return current, err
 }
 func (s ProjectStore) DeleteNode(ctx context.Context, id string) error {
