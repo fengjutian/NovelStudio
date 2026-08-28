@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { ProjectType } from './types'
+import type { KnowledgeSource, Project } from './types'
 
 const typeInfo: Record<ProjectType, { label: string; icon: string; accent: string }> = {
   NOVEL: { label: '小说', icon: '文', accent: 'amber' },
@@ -15,6 +16,7 @@ export function App() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [type, setType] = useState<ProjectType>('NOVEL')
+  const [selected, setSelected] = useState<Project | null>(null)
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
   const create = useMutation({
     mutationFn: api.createProject,
@@ -67,7 +69,7 @@ export function App() {
         <section className="grid">
           {projects.data?.items.map((project) => {
             const info = typeInfo[project.type]
-            return <article className="project-card" key={project.id}>
+            return <article className="project-card" key={project.id} onClick={() => setSelected(project)}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
               <div className="project-top"><span>{info.label}</span><button aria-label="项目菜单">•••</button></div>
               <h3>{project.name}</h3>
@@ -92,6 +94,43 @@ export function App() {
           <div className="dialog-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>取消</button><button className="primary" disabled={create.isPending}>{create.isPending ? '创建中…' : '创建项目'}</button></div>
         </form>
       </div>}
+      {selected && <Workspace project={selected} onClose={() => setSelected(null)} />}
     </div>
   )
+}
+
+function Workspace({ project, onClose }: { project: Project; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [tab, setTab] = useState<'documents' | 'knowledge'>('documents')
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [sourceName, setSourceName] = useState('')
+  const [sourceContent, setSourceContent] = useState('')
+  const [authority, setAuthority] = useState<KnowledgeSource['authority']>('REFERENCE')
+  const [query, setQuery] = useState('')
+  const [submittedQuery, setSubmittedQuery] = useState('')
+  const documents = useQuery({ queryKey: ['documents', project.id], queryFn: () => api.documents(project.id) })
+  const sources = useQuery({ queryKey: ['sources', project.id], queryFn: () => api.sources(project.id) })
+  const search = useQuery({ queryKey: ['knowledge-search', project.id, submittedQuery], queryFn: () => api.searchKnowledge(project.id, submittedQuery), enabled: submittedQuery.length > 0 })
+  const createDocument = useMutation({ mutationFn: () => api.createDocument(project.id, { title, content }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents', project.id] }); setTitle(''); setContent('') } })
+  const createSource = useMutation({ mutationFn: () => api.createSource(project.id, { name: sourceName, authority, content: sourceContent }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sources', project.id] }); setSourceName(''); setSourceContent('') } })
+
+  return <div className="workspace-layer">
+    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><span>草稿工作区</span></div>
+    <div className="workspace-body">
+      <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
+      <section className="workspace-content">
+        {tab === 'documents' ? <>
+          <div className="workspace-title"><div><p className="eyebrow">DOCUMENTS</p><h2>文档与版本</h2><p>每次保存都会形成不可变版本，恢复历史也不会覆盖原始内容。</p></div></div>
+          <form className="studio-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
+          <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article key={item.id}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>查看版本 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
+        </> : <>
+          <div className="workspace-title"><div><p className="eyebrow">KNOWLEDGE BASE</p><h2>知识来源</h2><p>录入资料时标记权威等级，生成和校验将优先引用可靠来源。</p></div></div>
+          <div className="knowledge-grid"><form className="studio-form" onSubmit={(e) => { e.preventDefault(); createSource.mutate() }}><h3>录入知识</h3><input required value={sourceName} onChange={(e) => setSourceName(e.target.value)} placeholder="来源名称" /><select value={authority} onChange={(e) => setAuthority(e.target.value as KnowledgeSource['authority'])}><option value="OFFICIAL">官方资料</option><option value="VERIFIED">人工确认</option><option value="INTERNAL">内部资料</option><option value="REFERENCE">普通参考</option></select><textarea required rows={7} value={sourceContent} onChange={(e) => setSourceContent(e.target.value)} placeholder="粘贴知识内容，系统将按结构分块…" /><button className="primary" disabled={createSource.isPending}>解析并加入知识库</button></form>
+          <div className="search-panel"><h3>检索测试</h3><form onSubmit={(e) => { e.preventDefault(); setSubmittedQuery(query.trim()) }}><input required value={query} onChange={(e) => setQuery(e.target.value)} placeholder="输入事实、术语或问题" /><button>检索</button></form>{search.data?.items.map((hit) => <article key={hit.chunk.id}><p>{hit.chunk.content}</p><small>{hit.source.name} · {hit.source.authority} · 匹配度 {Math.round(hit.score * 100)}%</small></article>)}{submittedQuery && search.data?.total === 0 && <p className="empty-line">没有找到支持证据</p>}</div></div>
+          <div className="resource-list"><h3>来源资料 <span>{sources.data?.total ?? 0}</span></h3>{sources.data?.items.map((item) => <article key={item.id}><div><strong>{item.name}</strong><small>{item.authority} · {item.status}</small></div><span>{item.version || '无版本标记'}</span></article>)}</div>
+        </>}
+      </section>
+    </div>
+  </div>
 }

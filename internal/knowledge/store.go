@@ -137,8 +137,10 @@ func split(s *MemoryStore, sourceID, content string, now time.Time) []Chunk {
 	return chunks
 }
 
-func (s *MemoryStore) nextID(prefix string) string { return fmt.Sprintf("%s_%06d", prefix, s.sequence.Add(1)) }
-func hash(content string) string                    { return fmt.Sprintf("%x", sha256.Sum256([]byte(content))) }
+func (s *MemoryStore) nextID(prefix string) string {
+	return fmt.Sprintf("%s_%06d", prefix, s.sequence.Add(1))
+}
+func hash(content string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(content))) }
 func fallback(value, defaultValue string) string {
 	if strings.TrimSpace(value) == "" {
 		return defaultValue

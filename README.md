@@ -8,10 +8,12 @@
 - 按项目模板初始化的内容树
 - 项目列表、创建、详情、删除和内容树 API
 - React 项目工作台和创建项目界面
+- 文档不可变版本、版本历史和非破坏性恢复
+- 知识来源录入、结构分块、项目隔离检索和权威来源排序
 - 知识来源、结构化事实、模型角色、模型路由和校验结果领域定义
 - 零外部依赖的内存存储，便于先验证产品闭环
 
-当前属于第一个可运行开发增量。数据在 API 重启后会重置；MySQL、Redis、真实模型调用和完整编辑器将在后续增量接入。
+当前使用内存仓储，数据在 API 重启后会重置；MySQL、Redis 和真实模型调用将在后续增量接入。
 
 ## 本地运行
 
@@ -49,6 +51,15 @@ POST   /api/v1/projects
 GET    /api/v1/projects/{id}
 DELETE /api/v1/projects/{id}
 GET    /api/v1/projects/{id}/tree
+GET    /api/v1/projects/{id}/documents
+POST   /api/v1/projects/{id}/documents
+GET    /api/v1/documents/{id}
+GET    /api/v1/documents/{id}/versions
+POST   /api/v1/documents/{id}/versions
+POST   /api/v1/documents/{id}/versions/{versionId}/restore
+GET    /api/v1/projects/{id}/knowledge/sources
+POST   /api/v1/projects/{id}/knowledge/sources
+GET    /api/v1/projects/{id}/knowledge/search?q=关键词
 ```
 
 创建项目示例：
@@ -84,8 +95,8 @@ Judge + Quality Gate
 ## 下一阶段
 
 1. MySQL 迁移、sqlc Repository 和乐观锁
-2. 文档、不可变版本、Diff 与恢复
-3. 知识文件摄取、分块、全文检索和引用
+2. 文档 Diff、编辑器自动保存与引用定位
+3. PDF/DOCX 文件摄取、全文检索和语义检索
 4. OpenAI-Compatible Provider、模型注册与路由
 5. 双 Validator、Judge 仲裁和质量门禁
 6. Redis Worker、任务状态机与 SSE
