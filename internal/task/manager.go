@@ -2,6 +2,8 @@ package task
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -46,6 +48,15 @@ type Event struct {
 
 type Executor func(context.Context, func(int, string)) (any, error)
 
+type Repository interface {
+	SaveTask(context.Context, Task) error
+	AppendEvent(context.Context, Event) error
+	GetTask(context.Context, string) (Task, error)
+	ListTasks(context.Context, string) ([]Task, error)
+	EventsSince(context.Context, string, uint64) ([]Event, error)
+	RecoverInterrupted(context.Context, time.Time) error
+}
+
 type Manager struct {
 	mu          sync.RWMutex
 	sequence    atomic.Uint64
@@ -55,20 +66,31 @@ type Manager struct {
 	cancels     map[string]context.CancelFunc
 	listeners   map[string]map[uint64]chan Event
 	listenerSeq atomic.Uint64
+	repository  Repository
 }
 
 func NewManager() *Manager {
 	return &Manager{tasks: make(map[string]Task), events: make(map[string][]Event), cancels: make(map[string]context.CancelFunc), listeners: make(map[string]map[uint64]chan Event)}
 }
 
+func NewManagerWithRepository(repository Repository) *Manager {
+	m := NewManager()
+	m.repository = repository
+	if repository != nil {
+		_ = repository.RecoverInterrupted(context.Background(), time.Now().UTC())
+	}
+	return m
+}
+
 func (m *Manager) Create(projectID, taskType string, executor Executor) Task {
 	now := time.Now().UTC()
-	item := Task{ID: fmt.Sprintf("tsk_%06d", m.sequence.Add(1)), ProjectID: projectID, Type: taskType, Status: StatusPending, Progress: 0, Message: "任务已创建", CreatedAt: now}
+	item := Task{ID: newTaskID(), ProjectID: projectID, Type: taskType, Status: StatusPending, Progress: 0, Message: "任务已创建", CreatedAt: now}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
 	m.tasks[item.ID] = item
 	m.cancels[item.ID] = cancel
 	m.mu.Unlock()
+	m.persistTask(item)
 	m.publish(item.ID, "task.created", 0, item.Message)
 	go m.execute(ctx, item.ID, executor)
 	return item
@@ -79,12 +101,20 @@ func (m *Manager) Get(id string) (Task, error) {
 	defer m.mu.RUnlock()
 	item, ok := m.tasks[id]
 	if !ok {
+		if m.repository != nil {
+			return m.repository.GetTask(context.Background(), id)
+		}
 		return Task{}, ErrNotFound
 	}
 	return item, nil
 }
 
 func (m *Manager) List(projectID string) []Task {
+	if m.repository != nil {
+		if items, err := m.repository.ListTasks(context.Background(), projectID); err == nil {
+			return items
+		}
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	items := make([]Task, 0)
@@ -114,6 +144,7 @@ func (m *Manager) Cancel(id string) error {
 	item.EndedAt = &now
 	m.tasks[id] = item
 	m.mu.Unlock()
+	m.persistTask(item)
 	if cancel != nil {
 		cancel()
 	}
@@ -122,6 +153,9 @@ func (m *Manager) Cancel(id string) error {
 }
 
 func (m *Manager) EventsSince(id string, after uint64) ([]Event, error) {
+	if m.repository != nil {
+		return m.repository.EventsSince(context.Background(), id, after)
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, ok := m.tasks[id]; !ok {
@@ -137,11 +171,11 @@ func (m *Manager) EventsSince(id string, after uint64) ([]Event, error) {
 }
 
 func (m *Manager) Subscribe(id string) (<-chan Event, func(), error) {
+	if _, err := m.Get(id); err != nil {
+		return nil, nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.tasks[id]; !ok {
-		return nil, nil, ErrNotFound
-	}
 	listenerID := m.listenerSeq.Add(1)
 	channel := make(chan Event, 16)
 	if m.listeners[id] == nil {
@@ -194,13 +228,15 @@ func (m *Manager) execute(ctx context.Context, id string, executor Executor) {
 
 func (m *Manager) transition(id string, from Status, update func(*Task)) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	item, ok := m.tasks[id]
 	if !ok || item.Status != from {
+		m.mu.Unlock()
 		return false
 	}
 	update(&item)
 	m.tasks[id] = item
+	m.mu.Unlock()
+	m.persistTask(item)
 	return true
 }
 
@@ -215,8 +251,25 @@ func (m *Manager) publish(id, eventType string, progress int, message string) {
 		}
 	}
 	m.mu.Unlock()
+	if m.repository != nil {
+		_ = m.repository.AppendEvent(context.Background(), event)
+	}
+}
+
+func (m *Manager) persistTask(item Task) {
+	if m.repository != nil {
+		_ = m.repository.SaveTask(context.Background(), item)
+	}
 }
 
 func terminal(status Status) bool {
 	return status == StatusSuccess || status == StatusFailed || status == StatusCancelled
+}
+
+func newTaskID() string {
+	raw := make([]byte, 12)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Sprintf("tsk_%d", time.Now().UnixNano())
+	}
+	return "tsk_" + hex.EncodeToString(raw)
 }

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"novelstudio/internal/airun"
 	"novelstudio/internal/llm"
+	"novelstudio/internal/promptcatalog"
 )
 
 type ReviewRequest struct {
@@ -16,6 +18,8 @@ type ReviewRequest struct {
 	Task       string     `json:"task"`
 	Evidence   []Evidence `json:"evidence"`
 	Dimensions []string   `json:"dimensions"`
+	ProjectID  string     `json:"projectId,omitempty"`
+	TaskID     string     `json:"taskId,omitempty"`
 }
 
 type Evidence struct {
@@ -121,6 +125,8 @@ type ModelReviewer struct {
 	Provider     llm.Provider
 	Model        string
 	Role         string
+	Prompts      promptcatalog.Catalog
+	Recorder     airun.Recorder
 }
 
 func (r ModelReviewer) Review(ctx context.Context, request ReviewRequest) (result Result, run Run, err error) {
@@ -130,16 +136,25 @@ func (r ModelReviewer) Review(ctx context.Context, request ReviewRequest) (resul
 	if err != nil {
 		return result, run, err
 	}
+	promptName := "validator"
+	if strings.EqualFold(r.Role, "judge") {
+		promptName = "judge"
+	}
+	system, promptVersion, promptErr := r.Prompts.Load(promptName)
+	if promptErr != nil {
+		return result, run, promptErr
+	}
 	response, err := r.Provider.Generate(ctx, llm.GenerateRequest{
 		Model: r.Model, Temperature: 0, MaxTokens: 4000, ResponseSchema: resultSchema(),
 		Messages: []llm.Message{
-			{Role: "system", Content: validatorPrompt(r.Role)},
+			{Role: "system", Content: system},
 			{Role: "user", Content: string(payload)},
 		},
 	})
 	run.Latency = time.Since(start) / time.Millisecond
 	if err != nil {
 		run.Error = err.Error()
+		r.record(ctx, request, promptVersion, response, time.Since(start).Milliseconds(), "FAILED", err.Error())
 		return result, run, err
 	}
 	run.RequestID, run.InputTokens, run.OutputTokens = response.RequestID, response.InputTokens, response.OutputTokens
@@ -149,7 +164,15 @@ func (r ModelReviewer) Review(ctx context.Context, request ReviewRequest) (resul
 	}
 	normalize(&result)
 	run.Status = "SUCCESS"
+	r.record(ctx, request, promptVersion, response, int64(run.Latency), "SUCCESS", "")
 	return result, run, nil
+}
+
+func (r ModelReviewer) record(ctx context.Context, request ReviewRequest, promptVersion string, response llm.GenerateResponse, latency int64, status, errorText string) {
+	if r.Recorder == nil {
+		return
+	}
+	_ = r.Recorder.Record(ctx, airun.Run{ID: airun.NewID(), ProjectID: request.ProjectID, TaskID: request.TaskID, Role: strings.ToUpper(r.Role), Provider: r.ProviderName, Model: r.Model, PromptVersion: promptVersion, RequestID: response.RequestID, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens, LatencyMs: latency, Status: status, Error: errorText, CreatedAt: time.Now().UTC()})
 }
 
 func merge(results []Result) (Result, []Issue) {
@@ -252,10 +275,6 @@ func normalize(result *Result) {
 	if result.Issues == nil {
 		result.Issues = []Issue{}
 	}
-}
-
-func validatorPrompt(role string) string {
-	return "你是独立文本校验模型（" + role + "）。只依据任务、提供的文本和证据判断；证据不足时标记 unsupported_claim，不得使用未提供的常识补全。输出必须严格符合 JSON Schema，不输出思维过程。"
 }
 
 func resultSchema() map[string]any {

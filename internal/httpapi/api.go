@@ -48,7 +48,13 @@ func NewWithStores(store project.Store, docs document.Store, knowledgeStore know
 }
 
 func NewWithServices(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, logger *slog.Logger) http.Handler {
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: task.NewManager(), logger: logger}
+	return NewWithRuntime(store, docs, knowledgeStore, pipeline, generator, task.NewManager(), logger)
+}
+func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, logger *slog.Logger) http.Handler {
+	if tasks == nil {
+		tasks = task.NewManager()
+	}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -573,7 +579,7 @@ func (a *API) decodeReviewRequest(w http.ResponseWriter, r *http.Request, projec
 	if !decodeJSON(w, r, &input) {
 		return validation.ReviewRequest{}, false
 	}
-	request := validation.ReviewRequest{Text: input.Text, Task: input.Task, Dimensions: input.Dimensions}
+	request := validation.ReviewRequest{Text: input.Text, Task: input.Task, Dimensions: input.Dimensions, ProjectID: projectID}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, err := a.knowledge.Search(r.Context(), projectID, input.KnowledgeQuery, 8)
 		if err != nil {

@@ -18,16 +18,17 @@ import (
 	mysqlstore "novelstudio/internal/persistence/mysql"
 	"novelstudio/internal/project"
 	"novelstudio/internal/promptcatalog"
+	"novelstudio/internal/task"
 	"novelstudio/internal/validation"
 )
 
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
-	projectStore, documentStore, knowledgeStore, runRecorder, closeStore := stores()
+	projectStore, documentStore, knowledgeStore, runRecorder, taskManager, closeStore := stores()
 	defer closeStore()
-	pipeline := validationPipeline()
+	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)
-	handler := httpapi.NewWithServices(projectStore, documentStore, knowledgeStore, pipeline, generator, slog.Default())
+	handler := httpapi.NewWithRuntime(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
@@ -86,11 +87,11 @@ func first(values ...string) string {
 	return ""
 }
 
-func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, func()) {
+func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, *task.Manager, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
 		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
-		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), func() {}
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), task.NewManager(), func() {}
 	}
 	db, err := mysqlstore.Open(context.Background(), dsn)
 	if err != nil {
@@ -103,10 +104,10 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, f
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
-func validationPipeline() *validation.Pipeline {
+func validationPipeline(recorder airun.Recorder) *validation.Pipeline {
 	baseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))
 	models := split(os.Getenv("VALIDATOR_MODELS"))
 	if baseURL == "" || len(models) == 0 {
@@ -120,10 +121,10 @@ func validationPipeline() *validation.Pipeline {
 	}
 	pipeline := &validation.Pipeline{}
 	for index, model := range models {
-		pipeline.Validators = append(pipeline.Validators, validation.NamedReviewer{Name: fmt.Sprintf("VALIDATOR_%d", index+1), Reviewer: validation.ModelReviewer{ProviderName: "openai-compatible", Provider: provider, Model: model, Role: "validator"}})
+		pipeline.Validators = append(pipeline.Validators, validation.NamedReviewer{Name: fmt.Sprintf("VALIDATOR_%d", index+1), Reviewer: validation.ModelReviewer{ProviderName: "openai-compatible", Provider: provider, Model: model, Role: "validator", Recorder: recorder}})
 	}
 	if judgeModel := strings.TrimSpace(os.Getenv("JUDGE_MODEL")); judgeModel != "" {
-		pipeline.Judge = &validation.NamedReviewer{Name: "JUDGE", Reviewer: validation.ModelReviewer{ProviderName: "openai-compatible", Provider: provider, Model: judgeModel, Role: "judge"}}
+		pipeline.Judge = &validation.NamedReviewer{Name: "JUDGE", Reviewer: validation.ModelReviewer{ProviderName: "openai-compatible", Provider: provider, Model: judgeModel, Role: "judge", Recorder: recorder}}
 	}
 	return pipeline
 }
