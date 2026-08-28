@@ -71,14 +71,21 @@ export interface PipelineResult {
   runs: Array<{ role: string; provider: string; model: string; latencyMs: number; status: string }>
 }
 
-export interface AITask {
+export interface GenerationResult {
+  generation: { content: string; operation: string; promptVersion: string; provider: string; model: string; inputTokens: number; outputTokens: number; latencyMs: number; evidenceIds: string[] }
+  document?: Document
+  documentId?: string
+  version: DocumentVersion
+}
+
+export interface AITask<T = PipelineResult> {
   id: string
   projectId: string
   type: string
   status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
   progress: number
   message: string
-  result?: PipelineResult
+  result?: T
   error?: string
   createdAt: string
 }

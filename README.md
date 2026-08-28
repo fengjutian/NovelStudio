@@ -12,6 +12,8 @@
 - Markdown 文档编辑、手动/自动保存和乐观并发控制
 - 知识来源录入、结构分块、项目隔离检索和权威来源排序
 - OpenAI-Compatible 模型适配与 JSON Schema 结构化输出
+- Planner、Outliner、Writer、Polisher 内容生成任务
+- 基于知识证据生成并自动创建文档或版本
 - 多 Validator 并行独立校验、重大分歧 Judge 仲裁
 - 知识证据注入、评分聚合和硬规则质量门禁
 - 后台任务状态机、取消、结果保存和 SSE 断线续传
@@ -92,6 +94,7 @@ GET    /api/v1/models/status
 POST   /api/v1/projects/{id}/validate
 GET    /api/v1/projects/{id}/tasks
 POST   /api/v1/projects/{id}/validation-tasks
+POST   /api/v1/projects/{id}/generation-tasks
 GET    /api/v1/tasks/{id}
 POST   /api/v1/tasks/{id}/cancel
 GET    /api/v1/tasks/{id}/events
@@ -126,6 +129,10 @@ LLM_BASE_URL=https://your-openai-compatible-provider.example/v1
 LLM_API_KEY=your-server-side-key
 VALIDATOR_MODELS=validator-model-a,validator-model-b
 JUDGE_MODEL=judge-model
+PLANNER_MODEL=planner-model
+OUTLINER_MODEL=outline-model
+WRITER_MODEL=writer-model
+POLISHER_MODEL=polisher-model
 ```
 
 `VALIDATOR_MODELS` 支持逗号分隔的多个模型，它们会并行、独立校验。只有 Critical/Major 问题存在模型分歧时才调用 Judge，以控制成本。API Key 只由 Go 服务读取，不会通过状态接口或 Web 页面返回。

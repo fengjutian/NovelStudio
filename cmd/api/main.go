@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"novelstudio/internal/document"
+	"novelstudio/internal/generation"
 	"novelstudio/internal/httpapi"
 	"novelstudio/internal/knowledge"
 	"novelstudio/internal/llm"
@@ -23,7 +24,8 @@ func main() {
 	projectStore, documentStore, knowledgeStore, closeStore := stores()
 	defer closeStore()
 	pipeline := validationPipeline()
-	handler := httpapi.NewWithStores(projectStore, documentStore, knowledgeStore, pipeline, slog.Default())
+	generator := generationService()
+	handler := httpapi.NewWithServices(projectStore, documentStore, knowledgeStore, pipeline, generator, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
@@ -41,6 +43,43 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func generationService() *generation.Service {
+	baseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))
+	if baseURL == "" {
+		return nil
+	}
+	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY")})
+	if err != nil {
+		slog.Error("invalid generation model configuration", "error", err)
+		return nil
+	}
+	writerModel := strings.TrimSpace(os.Getenv("WRITER_MODEL"))
+	models := map[generation.Operation]string{
+		generation.OperationPlan:    first(strings.TrimSpace(os.Getenv("PLANNER_MODEL")), writerModel),
+		generation.OperationOutline: first(strings.TrimSpace(os.Getenv("OUTLINER_MODEL")), writerModel),
+		generation.OperationWrite:   writerModel,
+		generation.OperationPolish:  first(strings.TrimSpace(os.Getenv("POLISHER_MODEL")), writerModel),
+	}
+	configured := false
+	for _, model := range models {
+		configured = configured || model != ""
+	}
+	if !configured {
+		slog.Warn("content generation disabled; configure WRITER_MODEL or role-specific models")
+		return nil
+	}
+	return &generation.Service{ProviderName: "openai-compatible", Provider: provider, Models: models}
+}
+
+func first(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func stores() (project.Store, document.Store, knowledge.Store, func()) {

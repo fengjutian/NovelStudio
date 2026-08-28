@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { ProjectType } from './types'
-import type { Document, KnowledgeSource, Project } from './types'
+import type { Document, GenerationResult, KnowledgeSource, Project } from './types'
 
 const typeInfo: Record<ProjectType, { label: string; icon: string; accent: string }> = {
   NOVEL: { label: '小说', icon: '文', accent: 'amber' },
@@ -17,7 +17,7 @@ export function App() {
   const [description, setDescription] = useState('')
   const [type, setType] = useState<ProjectType>('NOVEL')
   const [selected, setSelected] = useState<Project | null>(null)
-  const [selectedTab, setSelectedTab] = useState<'documents' | 'knowledge' | 'quality'>('documents')
+  const [selectedTab, setSelectedTab] = useState<'documents' | 'generation' | 'knowledge' | 'quality'>('documents')
   const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'tasks' | 'models'>('projects')
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
   const create = useMutation({
@@ -125,9 +125,9 @@ function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 
   </>
 }
 
-function Workspace({ project, initialTab, onClose }: { project: Project; initialTab: 'documents' | 'knowledge' | 'quality'; onClose: () => void }) {
+function Workspace({ project, initialTab, onClose }: { project: Project; initialTab: 'documents' | 'generation' | 'knowledge' | 'quality'; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'documents' | 'knowledge' | 'quality'>(initialTab)
+  const [tab, setTab] = useState<'documents' | 'generation' | 'knowledge' | 'quality'>(initialTab)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
@@ -139,21 +139,29 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
   const [validationText, setValidationText] = useState('')
   const [validationQuery, setValidationQuery] = useState('')
   const [taskId, setTaskId] = useState('')
+  const [generationTaskId, setGenerationTaskId] = useState('')
+  const [operation, setOperation] = useState('PLAN')
+  const [instruction, setInstruction] = useState('')
+  const [generationTitle, setGenerationTitle] = useState('')
+  const [generationDocumentId, setGenerationDocumentId] = useState('')
+  const [generationQuery, setGenerationQuery] = useState('')
   const documents = useQuery({ queryKey: ['documents', project.id], queryFn: () => api.documents(project.id) })
   const sources = useQuery({ queryKey: ['sources', project.id], queryFn: () => api.sources(project.id) })
   const search = useQuery({ queryKey: ['knowledge-search', project.id, submittedQuery], queryFn: () => api.searchKnowledge(project.id, submittedQuery), enabled: submittedQuery.length > 0 })
   const modelStatus = useQuery({ queryKey: ['model-status'], queryFn: api.modelStatus })
   const activeTask = useQuery({ queryKey: ['task', taskId], queryFn: () => api.task(taskId), enabled: taskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
+  const generationTask = useQuery({ queryKey: ['generation-task', generationTaskId], queryFn: () => api.task<GenerationResult>(generationTaskId), enabled: generationTaskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
   const createDocument = useMutation({ mutationFn: () => api.createDocument(project.id, { title, content }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents', project.id] }); setTitle(''); setContent('') } })
   const createSource = useMutation({ mutationFn: () => api.createSource(project.id, { name: sourceName, authority, content: sourceContent }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sources', project.id] }); setSourceName(''); setSourceContent('') } })
   const validate = useMutation({ mutationFn: () => api.createValidationTask(project.id, { text: validationText, task: '校验文本的事实依据、一致性、完整性、术语和风格', knowledgeQuery: validationQuery, dimensions: ['groundedness', 'consistency', 'completeness', 'terminology', 'style'] }), onSuccess: (task) => setTaskId(task.id) })
   const cancelTask = useMutation({ mutationFn: () => api.cancelTask(taskId), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['task', taskId] }) })
+  const generate = useMutation({ mutationFn: () => api.createGenerationTask(project.id, { operation, instruction, title: generationTitle, documentId: operation === 'POLISH' ? generationDocumentId : '', knowledgeQuery: generationQuery }), onSuccess: (created) => setGenerationTaskId(created.id) })
   const validationResult = activeTask.data?.result
 
   return <div className="workspace-layer">
     <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><span>草稿工作区</span></div>
     <div className="workspace-body">
-      <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
+      <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
         {tab === 'documents' ? <>
           {selectedDocument ? <DocumentEditor document={selectedDocument} onBack={() => { setSelectedDocument(null); queryClient.invalidateQueries({ queryKey: ['documents', project.id] }) }} /> : <>
@@ -161,6 +169,13 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
             <form className="studio-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
             <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
           </>}
+        </> : tab === 'generation' ? <>
+          <div className="workspace-title"><div><p className="eyebrow">AGENT PIPELINE</p><h2>AI 内容创作</h2><p>使用 Planner、Outliner、Writer 或 Polisher，并将结果自动保存为文档版本。</p></div></div>
+          <div className={`model-status ${(modelStatus.data?.generationOperations?.length ?? 0) > 0 ? 'ready' : 'offline'}`}><strong>{(modelStatus.data?.generationOperations?.length ?? 0) > 0 ? '创作模型已就绪' : '创作模型未配置'}</strong><span>{modelStatus.data?.generationOperations?.join(' · ') || '请配置 WRITER_MODEL 或角色专用模型'}</span></div>
+          <form className="studio-form generation-form" onSubmit={(event) => { event.preventDefault(); setGenerationTaskId(''); generate.mutate() }}><div className="operation-grid">{[['PLAN', '策划'], ['OUTLINE', '目录'], ['WRITE', '正文'], ['POLISH', '润色']].map(([value, label]) => <button type="button" className={operation === value ? 'selected' : ''} onClick={() => setOperation(value)} key={value}><b>{value}</b><span>{label}</span></button>)}</div>{operation === 'POLISH' ? <label>选择待润色文档<select required value={generationDocumentId} onChange={(event) => setGenerationDocumentId(event.target.value)}><option value="">请选择文档</option>{documents.data?.items.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label> : <label>输出文档标题<input value={generationTitle} onChange={(event) => setGenerationTitle(event.target.value)} placeholder="留空则使用默认标题" /></label>}<label>创作要求<textarea required rows={7} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="描述内容目标、受众、风格、篇幅和必须覆盖的要点…" /></label><label>知识检索词<input value={generationQuery} onChange={(event) => setGenerationQuery(event.target.value)} placeholder="从项目知识库检索相关证据（可选）" /></label><button className="primary" disabled={generate.isPending || generationTask.data?.status === 'RUNNING' || !(modelStatus.data?.generationOperations?.includes(operation))}>{generate.isPending ? '正在创建任务…' : `运行 ${operation} Agent`}</button></form>
+          {generationTask.data && !['SUCCESS', 'FAILED', 'CANCELLED'].includes(generationTask.data.status) && <div className="task-progress"><div><strong>{generationTask.data.message}</strong><span>{generationTask.data.progress}%</span></div><i><b style={{ width: `${generationTask.data.progress}%` }} /></i></div>}
+          {(generate.isError || generationTask.data?.status === 'FAILED') && <p className="quality-error">{generate.error?.message || generationTask.data?.error}</p>}
+          {generationTask.data?.result && <section className="generation-result"><div><p className="eyebrow">GENERATED</p><h3>生成完成并已保存</h3><small>{generationTask.data.result.generation.model} · Prompt {generationTask.data.result.generation.promptVersion} · {generationTask.data.result.generation.outputTokens} tokens</small></div><pre>{generationTask.data.result.generation.content}</pre><button className="primary" onClick={() => { queryClient.invalidateQueries({ queryKey: ['documents', project.id] }); setTab('documents') }}>查看项目文档</button></section>}
         </> : tab === 'knowledge' ? <>
           <div className="workspace-title"><div><p className="eyebrow">KNOWLEDGE BASE</p><h2>知识来源</h2><p>录入资料时标记权威等级，生成和校验将优先引用可靠来源。</p></div></div>
           <div className="knowledge-grid"><form className="studio-form" onSubmit={(e) => { e.preventDefault(); createSource.mutate() }}><h3>录入知识</h3><input required value={sourceName} onChange={(e) => setSourceName(e.target.value)} placeholder="来源名称" /><select value={authority} onChange={(e) => setAuthority(e.target.value as KnowledgeSource['authority'])}><option value="OFFICIAL">官方资料</option><option value="VERIFIED">人工确认</option><option value="INTERNAL">内部资料</option><option value="REFERENCE">普通参考</option></select><textarea required rows={7} value={sourceContent} onChange={(e) => setSourceContent(e.target.value)} placeholder="粘贴知识内容，系统将按结构分块…" /><button className="primary" disabled={createSource.isPending}>解析并加入知识库</button></form>

@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"novelstudio/internal/document"
+	"novelstudio/internal/generation"
 	"novelstudio/internal/httpapi"
 	"novelstudio/internal/knowledge"
+	"novelstudio/internal/llm"
 	"novelstudio/internal/project"
 	"novelstudio/internal/task"
 	"novelstudio/internal/validation"
@@ -135,4 +137,45 @@ func TestAsyncValidationTask(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("validation task did not complete")
+}
+
+type generationProvider struct{}
+
+func (generationProvider) Generate(context.Context, llm.GenerateRequest) (llm.GenerateResponse, error) {
+	return llm.GenerateResponse{Content: "# Generated document", RequestID: "generation-request"}, nil
+}
+func (generationProvider) HealthCheck(context.Context) error { return nil }
+
+func TestGenerationTaskCreatesDocument(t *testing.T) {
+	projects := project.NewMemoryStore()
+	documents := document.NewMemoryStore()
+	knowledgeStore := knowledge.NewMemoryStore()
+	generator := &generation.Service{ProviderName: "test", Provider: generationProvider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer"}}
+	handler := httpapi.NewWithServices(projects, documents, knowledgeStore, nil, generator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	list, _ := projects.List(context.Background())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+list[0].ID+"/generation-tasks", bytes.NewBufferString(`{"operation":"WRITE","instruction":"write a guide","title":"Guide"}`)))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create generation task status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created task.Task
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		current := httptest.NewRecorder()
+		handler.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+created.ID, nil))
+		var item task.Task
+		_ = json.NewDecoder(current.Body).Decode(&item)
+		if item.Status == task.StatusSuccess {
+			items, err := documents.List(context.Background(), list[0].ID)
+			if err != nil || len(items) != 1 || items[0].Title != "Guide" {
+				t.Fatalf("generated documents=%#v err=%v", items, err)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("generation task did not complete")
 }

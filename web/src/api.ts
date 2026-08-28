@@ -1,4 +1,4 @@
-import type { AITask, Document, DocumentVersion, KnowledgeSource, Project, ProjectList, ProjectType, SearchHit } from './types'
+import type { AITask, Document, DocumentVersion, GenerationResult, KnowledgeSource, Project, ProjectList, ProjectType, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -29,10 +29,12 @@ export const api = {
     request<{ source: KnowledgeSource }>(`/api/v1/projects/${projectId}/knowledge/sources`, { method: 'POST', body: JSON.stringify(input) }),
   searchKnowledge: (projectId: string, query: string) =>
     request<{ items: SearchHit[]; total: number }>(`/api/v1/projects/${projectId}/knowledge/search?q=${encodeURIComponent(query)}`),
-  modelStatus: () => request<{ configured: boolean; validatorCount: number; judgeConfigured: boolean }>('/api/v1/models/status'),
+  modelStatus: () => request<{ configured: boolean; validatorCount: number; judgeConfigured: boolean; generationOperations: string[] }>('/api/v1/models/status'),
+  createGenerationTask: (projectId: string, input: { operation: string; instruction: string; title: string; documentId: string; knowledgeQuery: string }) =>
+    request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/generation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
   createValidationTask: (projectId: string, input: { text: string; task: string; knowledgeQuery: string; dimensions: string[] }) =>
     request<AITask>(`/api/v1/projects/${projectId}/validation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
-  task: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}`),
+  task: <T = import('./types').PipelineResult>(taskId: string) => request<AITask<T>>(`/api/v1/tasks/${taskId}`),
   tasks: () => request<{ items: AITask[]; total: number }>('/api/v1/tasks'),
   cancelTask: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}/cancel`, { method: 'POST' }),
 }

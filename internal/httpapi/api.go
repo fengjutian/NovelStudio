@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"novelstudio/internal/document"
+	"novelstudio/internal/generation"
 	"novelstudio/internal/knowledge"
 	"novelstudio/internal/project"
 	"novelstudio/internal/task"
@@ -23,6 +24,7 @@ type API struct {
 	docs      document.Store
 	knowledge knowledge.Store
 	pipeline  *validation.Pipeline
+	generator *generation.Service
 	tasks     *task.Manager
 	logger    *slog.Logger
 }
@@ -36,7 +38,11 @@ func NewWithPipeline(store project.Store, pipeline *validation.Pipeline, logger 
 }
 
 func NewWithStores(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, logger *slog.Logger) http.Handler {
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, tasks: task.NewManager(), logger: logger}
+	return NewWithServices(store, docs, knowledgeStore, pipeline, nil, logger)
+}
+
+func NewWithServices(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, logger *slog.Logger) http.Handler {
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: task.NewManager(), logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -59,6 +65,7 @@ func NewWithStores(store project.Store, docs document.Store, knowledgeStore know
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validation-tasks", a.createValidationTask)
+	mux.HandleFunc("POST /api/v1/projects/{id}/generation-tasks", a.createGenerationTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
@@ -69,11 +76,117 @@ func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {
 	configured := a.pipeline != nil && len(a.pipeline.Validators) > 0
 	validatorCount := 0
 	judgeConfigured := false
+	generationOperations := []string{}
 	if a.pipeline != nil {
 		validatorCount = len(a.pipeline.Validators)
 		judgeConfigured = a.pipeline.Judge != nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured})
+	if a.generator != nil {
+		for _, operation := range []generation.Operation{generation.OperationPlan, generation.OperationOutline, generation.OperationWrite, generation.OperationPolish} {
+			if a.generator.Configured(operation) {
+				generationOperations = append(generationOperations, string(operation))
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured, "generationOperations": generationOperations})
+}
+
+func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "generation models are not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Operation      generation.Operation `json:"operation"`
+		Instruction    string               `json:"instruction"`
+		Title          string               `json:"title"`
+		DocumentID     string               `json:"documentId"`
+		Content        string               `json:"content"`
+		KnowledgeQuery string               `json:"knowledgeQuery"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !input.Operation.Valid() || strings.TrimSpace(input.Instruction) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "valid operation and instruction are required")
+		return
+	}
+	if !a.generator.Configured(input.Operation) {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "model is not configured for "+string(input.Operation))
+		return
+	}
+	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), Instruction: input.Instruction, Content: input.Content}
+	if strings.TrimSpace(input.KnowledgeQuery) != "" {
+		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
+		if searchErr != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_QUERY", searchErr.Error())
+			return
+		}
+		for _, hit := range hits {
+			request.Evidence = append(request.Evidence, generation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
+		}
+	}
+	expectedVersionID := ""
+	if input.DocumentID != "" {
+		doc, getErr := a.docs.Get(r.Context(), input.DocumentID)
+		if getErr != nil || doc.ProjectID != projectItem.ID {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "document not found in project")
+			return
+		}
+		expectedVersionID = doc.CurrentVersionID
+		if request.Content == "" {
+			versions, versionErr := a.docs.Versions(r.Context(), doc.ID)
+			if versionErr != nil || len(versions) == 0 {
+				writeError(w, http.StatusUnprocessableEntity, "DOCUMENT_EMPTY", "document has no content version")
+				return
+			}
+			request.Content = versions[0].Content
+		}
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = operationTitle(input.Operation)
+	}
+	item := a.tasks.Create(projectItem.ID, string(input.Operation), func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(10, "知识上下文构建完成")
+		progress(20, string(input.Operation)+" Agent 正在生成")
+		generated, generateErr := a.generator.Generate(ctx, request)
+		if generateErr != nil {
+			return nil, generateErr
+		}
+		progress(85, "模型输出完成，正在创建文档版本")
+		if input.DocumentID == "" {
+			doc, version, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: title, Content: generated.Content})
+			if createErr != nil {
+				return nil, createErr
+			}
+			return map[string]any{"generation": generated, "document": doc, "version": version}, nil
+		}
+		version, versionErr := a.docs.CreateVersion(ctx, input.DocumentID, document.CreateVersionInput{Content: generated.Content, Reason: "AI_" + string(input.Operation), AuthorType: "AI", ExpectedVersionID: expectedVersionID})
+		if versionErr != nil {
+			return nil, versionErr
+		}
+		return map[string]any{"generation": generated, "documentId": input.DocumentID, "version": version}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
+}
+
+func operationTitle(operation generation.Operation) string {
+	switch operation {
+	case generation.OperationPlan:
+		return "AI 内容策划"
+	case generation.OperationOutline:
+		return "AI 内容目录"
+	case generation.OperationPolish:
+		return "AI 润色稿"
+	default:
+		return "AI 生成正文"
+	}
 }
 
 func (a *API) validateText(w http.ResponseWriter, r *http.Request) {
