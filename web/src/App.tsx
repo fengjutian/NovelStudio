@@ -1,8 +1,8 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { ProjectType } from './types'
-import type { KnowledgeSource, Project } from './types'
+import type { Document, KnowledgeSource, Project } from './types'
 
 const typeInfo: Record<ProjectType, { label: string; icon: string; accent: string }> = {
   NOVEL: { label: '小说', icon: '文', accent: 'amber' },
@@ -104,6 +104,7 @@ function Workspace({ project, onClose }: { project: Project; onClose: () => void
   const [tab, setTab] = useState<'documents' | 'knowledge' | 'quality'>('documents')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
   const [sourceName, setSourceName] = useState('')
   const [sourceContent, setSourceContent] = useState('')
   const [authority, setAuthority] = useState<KnowledgeSource['authority']>('REFERENCE')
@@ -129,9 +130,11 @@ function Workspace({ project, onClose }: { project: Project; onClose: () => void
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
         {tab === 'documents' ? <>
-          <div className="workspace-title"><div><p className="eyebrow">DOCUMENTS</p><h2>文档与版本</h2><p>每次保存都会形成不可变版本，恢复历史也不会覆盖原始内容。</p></div></div>
-          <form className="studio-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
-          <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article key={item.id}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>查看版本 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
+          {selectedDocument ? <DocumentEditor document={selectedDocument} onBack={() => { setSelectedDocument(null); queryClient.invalidateQueries({ queryKey: ['documents', project.id] }) }} /> : <>
+            <div className="workspace-title"><div><p className="eyebrow">DOCUMENTS</p><h2>文档与版本</h2><p>每次保存都会形成不可变版本，恢复历史也不会覆盖原始内容。</p></div></div>
+            <form className="studio-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
+            <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
+          </>}
         </> : tab === 'knowledge' ? <>
           <div className="workspace-title"><div><p className="eyebrow">KNOWLEDGE BASE</p><h2>知识来源</h2><p>录入资料时标记权威等级，生成和校验将优先引用可靠来源。</p></div></div>
           <div className="knowledge-grid"><form className="studio-form" onSubmit={(e) => { e.preventDefault(); createSource.mutate() }}><h3>录入知识</h3><input required value={sourceName} onChange={(e) => setSourceName(e.target.value)} placeholder="来源名称" /><select value={authority} onChange={(e) => setAuthority(e.target.value as KnowledgeSource['authority'])}><option value="OFFICIAL">官方资料</option><option value="VERIFIED">人工确认</option><option value="INTERNAL">内部资料</option><option value="REFERENCE">普通参考</option></select><textarea required rows={7} value={sourceContent} onChange={(e) => setSourceContent(e.target.value)} placeholder="粘贴知识内容，系统将按结构分块…" /><button className="primary" disabled={createSource.isPending}>解析并加入知识库</button></form>
@@ -150,4 +153,60 @@ function Workspace({ project, onClose }: { project: Project; onClose: () => void
       </section>
     </div>
   </div>
+}
+
+function DocumentEditor({ document, onBack }: { document: Document; onBack: () => void }) {
+  const queryClient = useQueryClient()
+  const [content, setContent] = useState('')
+  const [baseVersionId, setBaseVersionId] = useState('')
+  const [savedContent, setSavedContent] = useState('')
+  const [autoSave, setAutoSave] = useState(false)
+  const versions = useQuery({ queryKey: ['versions', document.id], queryFn: () => api.versions(document.id) })
+  const save = useMutation({
+    mutationFn: () => api.saveVersion(document.id, { content, reason: autoSave ? 'AUTO_SAVE' : 'HUMAN_EDIT', expectedVersionId: baseVersionId }),
+    onSuccess: (version) => {
+      setBaseVersionId(version.id)
+      setSavedContent(content)
+      queryClient.invalidateQueries({ queryKey: ['versions', document.id] })
+    },
+  })
+  const restore = useMutation({
+    mutationFn: (versionId: string) => api.restoreVersion(document.id, versionId),
+    onSuccess: (version) => {
+      setContent(version.content)
+      setSavedContent(version.content)
+      setBaseVersionId(version.id)
+      queryClient.invalidateQueries({ queryKey: ['versions', document.id] })
+    },
+  })
+  const latest = versions.data?.items[0]
+  const dirty = Boolean(baseVersionId && content !== savedContent)
+
+  useEffect(() => {
+    if (latest && !baseVersionId) {
+      setContent(latest.content)
+      setSavedContent(latest.content)
+      setBaseVersionId(latest.id)
+    }
+  }, [latest, baseVersionId])
+
+  useEffect(() => {
+    if (!autoSave || !dirty || save.isPending) return
+    const timer = window.setTimeout(() => save.mutate(), 3000)
+    return () => window.clearTimeout(timer)
+  }, [autoSave, content, dirty, baseVersionId, save])
+
+  function reloadLatest() {
+    if (!latest) return
+    setContent(latest.content)
+    setSavedContent(latest.content)
+    setBaseVersionId(latest.id)
+    save.reset()
+  }
+
+  return <section className="document-editor">
+    <div className="editor-head"><button onClick={onBack}>← 文档列表</button><div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
+    {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
+    <div className="editor-layout"><div className="markdown-pane"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="开始编写 Markdown 内容…" /><footer><span>{content.length} 字符</span><span>{dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复此版本</button>}</article>)}</aside></div>
+  </section>
 }

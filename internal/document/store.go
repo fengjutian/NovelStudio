@@ -16,6 +16,7 @@ var (
 	ErrNotFound     = errors.New("document not found")
 	ErrVersionFound = errors.New("document version not found")
 	ErrNoChange     = errors.New("content has not changed")
+	ErrConflict     = errors.New("document was changed by another editor")
 )
 
 type Store interface {
@@ -99,6 +100,9 @@ func (s *MemoryStore) CreateVersion(_ context.Context, documentID string, input 
 	}
 	items := s.versions[documentID]
 	latest := items[len(items)-1]
+	if input.ExpectedVersionID != "" && input.ExpectedVersionID != latest.ID {
+		return Version{}, ErrConflict
+	}
 	if hash(input.Content) == latest.ContentHash {
 		return Version{}, ErrNoChange
 	}

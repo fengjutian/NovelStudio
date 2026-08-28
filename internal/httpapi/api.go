@@ -414,6 +414,8 @@ func (a *API) handleDocumentError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, document.ErrNoChange):
 		writeError(w, http.StatusConflict, "NO_CHANGE", err.Error())
+	case errors.Is(err, document.ErrConflict):
+		writeError(w, http.StatusConflict, "VERSION_CONFLICT", err.Error())
 	default:
 		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
 	}

@@ -9,6 +9,7 @@
 - 项目列表、创建、详情、删除和内容树 API
 - React 项目工作台和创建项目界面
 - 文档不可变版本、版本历史和非破坏性恢复
+- Markdown 文档编辑、手动/自动保存和乐观并发控制
 - 知识来源录入、结构分块、项目隔离检索和权威来源排序
 - OpenAI-Compatible 模型适配与 JSON Schema 结构化输出
 - 多 Validator 并行独立校验、重大分歧 Judge 仲裁
@@ -95,6 +96,18 @@ GET    /api/v1/tasks/{id}
 POST   /api/v1/tasks/{id}/cancel
 GET    /api/v1/tasks/{id}/events
 ```
+
+创建文档版本时可以携带编辑器加载时的版本 ID：
+
+```json
+{
+  "content": "更新后的 Markdown 内容",
+  "reason": "HUMAN_EDIT",
+  "expectedVersionId": "ver_xxx"
+}
+```
+
+如果服务器当前版本已经变化，接口返回 `409 VERSION_CONFLICT`，客户端应保留本地修改并让用户决定是否重新加载。
 
 创建项目示例：
 

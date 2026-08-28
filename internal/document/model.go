@@ -31,7 +31,8 @@ type CreateInput struct {
 }
 
 type CreateVersionInput struct {
-	Content    string `json:"content"`
-	Reason     string `json:"reason"`
-	AuthorType string `json:"authorType"`
+	Content           string `json:"content"`
+	Reason            string `json:"reason"`
+	AuthorType        string `json:"authorType"`
+	ExpectedVersionID string `json:"expectedVersionId"`
 }

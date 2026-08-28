@@ -24,6 +24,18 @@ export interface Document {
   updatedAt: string
 }
 
+export interface DocumentVersion {
+  id: string
+  documentId: string
+  parentVersionId?: string
+  versionNumber: number
+  content: string
+  contentHash: string
+  reason: string
+  authorType: string
+  createdAt: string
+}
+
 export interface KnowledgeSource {
   id: string
   name: string

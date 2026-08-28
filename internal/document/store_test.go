@@ -39,3 +39,16 @@ func TestUnchangedContentIsRejected(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNoChange", err)
 	}
 }
+
+func TestStaleVersionIsRejected(t *testing.T) {
+	store := document.NewMemoryStore()
+	doc, first, _ := store.Create(context.Background(), document.CreateInput{ProjectID: "p1", Title: "Guide", Content: "v1"})
+	_, err := store.CreateVersion(context.Background(), doc.ID, document.CreateVersionInput{Content: "v2", ExpectedVersionID: first.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateVersion(context.Background(), doc.ID, document.CreateVersionInput{Content: "stale edit", ExpectedVersionID: first.ID})
+	if !errors.Is(err, document.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+}

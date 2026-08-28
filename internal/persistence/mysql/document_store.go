@@ -104,6 +104,9 @@ func (s DocumentStore) CreateVersion(ctx context.Context, documentID string, inp
 	if err != nil {
 		return document.Version{}, err
 	}
+	if input.ExpectedVersionID != "" && input.ExpectedVersionID != currentID {
+		return document.Version{}, document.ErrConflict
+	}
 	var currentHash string
 	if err := tx.QueryRowContext(ctx, `SELECT content_hash FROM document_versions WHERE id=?`, currentID).Scan(&currentHash); err != nil {
 		return document.Version{}, err
