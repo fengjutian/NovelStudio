@@ -10,7 +10,9 @@
 - React 项目工作台和创建项目界面
 - 文档不可变版本、版本历史和非破坏性恢复
 - 知识来源录入、结构分块、项目隔离检索和权威来源排序
-- 知识来源、结构化事实、模型角色、模型路由和校验结果领域定义
+- OpenAI-Compatible 模型适配与 JSON Schema 结构化输出
+- 多 Validator 并行独立校验、重大分歧 Judge 仲裁
+- 知识证据注入、评分聚合和硬规则质量门禁
 - 零外部依赖的内存存储，便于先验证产品闭环
 
 当前使用内存仓储，数据在 API 重启后会重置；MySQL、Redis 和真实模型调用将在后续增量接入。
@@ -60,6 +62,8 @@ POST   /api/v1/documents/{id}/versions/{versionId}/restore
 GET    /api/v1/projects/{id}/knowledge/sources
 POST   /api/v1/projects/{id}/knowledge/sources
 GET    /api/v1/projects/{id}/knowledge/search?q=关键词
+GET    /api/v1/models/status
+POST   /api/v1/projects/{id}/validate
 ```
 
 创建项目示例：
@@ -71,6 +75,17 @@ GET    /api/v1/projects/{id}/knowledge/search?q=关键词
   "description": "基于官方接口定义生成并校验文档"
 }
 ```
+
+配置多模型校验：
+
+```env
+LLM_BASE_URL=https://your-openai-compatible-provider.example/v1
+LLM_API_KEY=your-server-side-key
+VALIDATOR_MODELS=validator-model-a,validator-model-b
+JUDGE_MODEL=judge-model
+```
+
+`VALIDATOR_MODELS` 支持逗号分隔的多个模型，它们会并行、独立校验。只有 Critical/Major 问题存在模型分歧时才调用 Judge，以控制成本。API Key 只由 Go 服务读取，不会通过状态接口或 Web 页面返回。
 
 ## 架构原则
 
@@ -97,6 +112,6 @@ Judge + Quality Gate
 1. MySQL 迁移、sqlc Repository 和乐观锁
 2. 文档 Diff、编辑器自动保存与引用定位
 3. PDF/DOCX 文件摄取、全文检索和语义检索
-4. OpenAI-Compatible Provider、模型注册与路由
-5. 双 Validator、Judge 仲裁和质量门禁
+4. 模型注册持久化、不同 Provider 路由和费用预算
+5. 校验结果持久化、人工覆盖和自动修复闭环
 6. Redis Worker、任务状态机与 SSE

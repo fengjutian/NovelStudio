@@ -11,21 +11,27 @@ import (
 	"novelstudio/internal/document"
 	"novelstudio/internal/knowledge"
 	"novelstudio/internal/project"
+	"novelstudio/internal/validation"
 )
 
 type API struct {
 	store     project.Store
 	docs      document.Store
 	knowledge knowledge.Store
+	pipeline  *validation.Pipeline
 	logger    *slog.Logger
 }
 
 func New(store project.Store, logger *slog.Logger) http.Handler {
-	return NewWithStores(store, document.NewMemoryStore(), knowledge.NewMemoryStore(), logger)
+	return NewWithStores(store, document.NewMemoryStore(), knowledge.NewMemoryStore(), nil, logger)
 }
 
-func NewWithStores(store project.Store, docs document.Store, knowledgeStore knowledge.Store, logger *slog.Logger) http.Handler {
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, logger: logger}
+func NewWithPipeline(store project.Store, pipeline *validation.Pipeline, logger *slog.Logger) http.Handler {
+	return NewWithStores(store, document.NewMemoryStore(), knowledge.NewMemoryStore(), pipeline, logger)
+}
+
+func NewWithStores(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, logger *slog.Logger) http.Handler {
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -43,7 +49,59 @@ func NewWithStores(store project.Store, docs document.Store, knowledgeStore know
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/sources", a.listKnowledgeSources)
 	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/sources", a.createKnowledgeSource)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/search", a.searchKnowledge)
+	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
+	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	return recoverer(logger, requestLogger(logger, cors(mux)))
+}
+
+func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {
+	configured := a.pipeline != nil && len(a.pipeline.Validators) > 0
+	validatorCount := 0
+	judgeConfigured := false
+	if a.pipeline != nil {
+		validatorCount = len(a.pipeline.Validators)
+		judgeConfigured = a.pipeline.Judge != nil
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured})
+}
+
+func (a *API) validateText(w http.ResponseWriter, r *http.Request) {
+	if a.pipeline == nil {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "validation models are not configured")
+		return
+	}
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Text           string   `json:"text"`
+		Task           string   `json:"task"`
+		KnowledgeQuery string   `json:"knowledgeQuery"`
+		Dimensions     []string `json:"dimensions"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	request := validation.ReviewRequest{Text: input.Text, Task: input.Task, Dimensions: input.Dimensions}
+	if strings.TrimSpace(input.KnowledgeQuery) != "" {
+		hits, err := a.knowledge.Search(r.Context(), projectID, input.KnowledgeQuery, 8)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
+			return
+		}
+		for _, hit := range hits {
+			request.Evidence = append(request.Evidence, validation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
+		}
+	}
+	result, err := a.pipeline.Validate(r.Context(), request)
+	if err != nil {
+		a.logger.Error("validation pipeline failed", "projectId", projectID, "error", err)
+		writeError(w, http.StatusBadGateway, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {

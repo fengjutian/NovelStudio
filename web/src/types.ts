@@ -40,3 +40,21 @@ export interface SearchHit {
   score: number
   matchType: string
 }
+
+export interface ValidationIssue {
+  id: string
+  type: string
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR'
+  claim: string
+  explanation: string
+  suggestedFix: string
+  evidenceIds: string[]
+  confidence: number
+}
+
+export interface PipelineResult {
+  result: { score: number; verdict: string; dimensions: Record<string, number>; issues: ValidationIssue[] }
+  disagreements: number
+  gate: { status: 'PASS' | 'WARNING' | 'FAIL'; reasons: string[] }
+  runs: Array<{ role: string; provider: string; model: string; latencyMs: number; status: string }>
+}
