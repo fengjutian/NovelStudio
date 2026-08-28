@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -8,25 +9,31 @@ import (
 	"strings"
 	"time"
 
+	"novelstudio/internal/document"
 	"novelstudio/internal/httpapi"
+	"novelstudio/internal/knowledge"
 	"novelstudio/internal/llm"
+	mysqlstore "novelstudio/internal/persistence/mysql"
 	"novelstudio/internal/project"
 	"novelstudio/internal/validation"
 )
 
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
-	store := project.NewMemoryStore()
+	projectStore, documentStore, knowledgeStore, closeStore := stores()
+	defer closeStore()
 	pipeline := validationPipeline()
-	handler := httpapi.NewWithPipeline(store, pipeline, slog.Default())
+	handler := httpapi.NewWithStores(projectStore, documentStore, knowledgeStore, pipeline, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// SSE task events may remain open for the lifetime of an AI task.
+		// Individual model calls enforce their own timeout.
+		WriteTimeout: 0,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	slog.Info("AI Content Studio API started", "addr", addr)
@@ -34,6 +41,26 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func stores() (project.Store, document.Store, knowledge.Store, func()) {
+	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
+	if dsn == "" {
+		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), func() {}
+	}
+	db, err := mysqlstore.Open(context.Background(), dsn)
+	if err != nil {
+		slog.Error("cannot connect to MySQL", "error", err)
+		os.Exit(1)
+	}
+	if err := mysqlstore.Migrate(context.Background(), db); err != nil {
+		db.Close()
+		slog.Error("cannot migrate MySQL", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("MySQL persistence enabled")
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, func() { _ = db.Close() }
 }
 
 func validationPipeline() *validation.Pipeline {

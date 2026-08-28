@@ -16,7 +16,7 @@
 - 后台任务状态机、取消、结果保存和 SSE 断线续传
 - 零外部依赖的内存存储，便于先验证产品闭环
 
-当前使用内存仓储，数据在 API 重启后会重置；MySQL、Redis 和真实模型调用将在后续增量接入。
+配置 `MYSQL_DSN` 后使用 MySQL 8.4 持久化；未配置时自动使用内存仓储，数据会在 API 重启后重置。后台任务目前仍保存在内存中。
 
 ## 本地运行
 
@@ -43,6 +43,30 @@ npm run dev
 ```
 
 浏览器打开 `http://localhost:5173`。Vite 会将 `/api` 请求代理到 Go API。
+
+## 原生 MySQL 持久化
+
+项目不依赖 Docker。请先在本机或服务器安装并启动 MySQL 8.4，然后创建数据库和应用账号：
+
+```sql
+CREATE DATABASE contentstudio CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'contentstudio'@'localhost' IDENTIFIED BY 'replace-with-a-strong-password';
+GRANT ALL PRIVILEGES ON contentstudio.* TO 'contentstudio'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+设置环境变量后直接启动 Go API。PowerShell 示例：
+
+```powershell
+$env:MYSQL_DSN='contentstudio:replace-with-a-strong-password@tcp(127.0.0.1:3306)/contentstudio?parseTime=true&charset=utf8mb4'
+go run ./cmd/api
+```
+
+应用启动时会自动执行嵌入式迁移。手工审查用迁移文件位于 `db/migrations`。DSN 必须包含 `parseTime=true`，例如：
+
+```env
+MYSQL_DSN=contentstudio:contentstudio@tcp(localhost:3306)/contentstudio?parseTime=true&charset=utf8mb4
+```
 
 ## API
 
@@ -115,8 +139,8 @@ Judge + Quality Gate
 
 ## 下一阶段
 
-1. MySQL 迁移、sqlc Repository 和乐观锁
-2. 文档 Diff、编辑器自动保存与引用定位
+1. 后台任务与校验结果 MySQL 持久化、任务租约和重试
+2. 文档 Diff、乐观锁、编辑器自动保存与引用定位
 3. PDF/DOCX 文件摄取、全文检索和语义检索
 4. 模型注册持久化、不同 Provider 路由和费用预算
 5. 校验结果持久化、人工覆盖和自动修复闭环

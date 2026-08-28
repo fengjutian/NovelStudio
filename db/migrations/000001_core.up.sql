@@ -1,0 +1,103 @@
+CREATE TABLE IF NOT EXISTS projects (
+    id VARCHAR(32) PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    project_type ENUM('NOVEL', 'MOVIE_COMMENTARY', 'TECHNICAL_DOCUMENT') NOT NULL,
+    description TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    deleted_at DATETIME(6) NULL,
+    INDEX idx_projects_updated_at (updated_at),
+    INDEX idx_projects_type (project_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS content_nodes (
+    id VARCHAR(40) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL,
+    parent_id VARCHAR(40) NULL,
+    node_type VARCHAR(40) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    position INT NOT NULL,
+    metadata JSON NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_content_nodes_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_content_nodes_parent FOREIGN KEY (parent_id) REFERENCES content_nodes(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_content_node_position (project_id, parent_id, position),
+    INDEX idx_content_nodes_project (project_id, position)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS documents (
+    id VARCHAR(32) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    current_version_id VARCHAR(32) NULL,
+    version_count INT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    deleted_at DATETIME(6) NULL,
+    CONSTRAINT fk_documents_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_documents_project_updated (project_id, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS document_versions (
+    id VARCHAR(32) PRIMARY KEY,
+    document_id VARCHAR(32) NOT NULL,
+    parent_version_id VARCHAR(32) NULL,
+    version_number INT NOT NULL,
+    content LONGTEXT NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    reason VARCHAR(80) NOT NULL,
+    author_type VARCHAR(32) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_versions_document FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_versions_parent FOREIGN KEY (parent_version_id) REFERENCES document_versions(id),
+    UNIQUE KEY uk_document_version_number (document_id, version_number),
+    INDEX idx_document_versions_created (document_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+ALTER TABLE documents
+    ADD CONSTRAINT fk_documents_current_version FOREIGN KEY (current_version_id) REFERENCES document_versions(id);
+
+CREATE TABLE IF NOT EXISTS knowledge_sources (
+    id VARCHAR(32) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL,
+    knowledge_base_id VARCHAR(40) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    source_type VARCHAR(40) NOT NULL,
+    version VARCHAR(80) NOT NULL DEFAULT '',
+    authority ENUM('OFFICIAL', 'VERIFIED', 'INTERNAL', 'REFERENCE') NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_knowledge_sources_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_knowledge_sources_project (project_id, created_at),
+    INDEX idx_knowledge_sources_hash (project_id, content_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id VARCHAR(32) PRIMARY KEY,
+    source_id VARCHAR(32) NOT NULL,
+    position INT NOT NULL,
+    content MEDIUMTEXT NOT NULL,
+    token_hint INT NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_knowledge_chunks_source FOREIGN KEY (source_id) REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_knowledge_chunk_position (source_id, position),
+    FULLTEXT KEY ft_knowledge_chunks_content (content)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS validation_results (
+    id VARCHAR(32) PRIMARY KEY,
+    project_id VARCHAR(32) NOT NULL,
+    task_id VARCHAR(32) NULL,
+    text_hash CHAR(64) NOT NULL,
+    knowledge_snapshot JSON NULL,
+    score INT NOT NULL,
+    verdict VARCHAR(16) NOT NULL,
+    gate_status VARCHAR(16) NOT NULL,
+    result JSON NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_validation_results_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_validation_project_created (project_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
