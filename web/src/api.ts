@@ -39,6 +39,7 @@ export const api = {
   task: <T = PipelineResult>(taskId: string) => request<AITask<T>>(`/api/v1/tasks/${taskId}`),
   tasks: () => request<{ items: AITask[]; total: number }>('/api/v1/tasks'),
   cancelTask: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}/cancel`, { method: 'POST' }),
+  retryTask: (taskId:string) => request<AITask>(`/api/v1/tasks/${taskId}/retry`,{method:'POST'}),
   tree: (projectId:string) => request<{items:ContentNode[]}>(`/api/v1/projects/${projectId}/tree`),
   createNode: (projectId:string,input:{parentId?:string;nodeType:string;title:string;position:number}) => request<ContentNode>(`/api/v1/projects/${projectId}/nodes`,{method:'POST',body:JSON.stringify(input)}),
   updateNode: (id:string,input:{title:string;position:number;metadata?:Record<string,unknown>;documentId?:string}) => request<ContentNode>(`/api/v1/nodes/${id}`,{method:'PUT',body:JSON.stringify(input)}),

@@ -27,6 +27,11 @@ func main() {
 	addr := env("HTTP_ADDR", ":8080")
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, taskManager, closeStore := stores()
 	defer closeStore()
+	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "15m")); err == nil && timeout > 0 {
+		taskManager.SetTimeout(timeout)
+	} else {
+		slog.Warn("invalid AI_TASK_TIMEOUT; using 15m", "value", os.Getenv("AI_TASK_TIMEOUT"))
+	}
 	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)
 	handler := httpapi.NewWithRuntime(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, slog.Default())

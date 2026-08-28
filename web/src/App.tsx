@@ -108,7 +108,10 @@ export function App() {
 }
 
 function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 'models'; projects: Project[]; onOpen: (project: Project, tab: WorkspaceTab) => void }) {
+  const queryClient = useQueryClient()
+  const [taskFilter,setTaskFilter]=useState('ALL')
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, enabled: page === 'tasks', refetchInterval: page === 'tasks' ? 2000 : false })
+  const retryTask=useMutation({mutationFn:api.retryTask,onSuccess:()=>queryClient.invalidateQueries({queryKey:['tasks']})})
   const models = useQuery({ queryKey: ['model-status'], queryFn: api.modelStatus, enabled: page === 'models' })
 
   if (page === 'knowledge') return <>
@@ -118,7 +121,7 @@ function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 
 
   if (page === 'tasks') return <>
     <header><div><p className="eyebrow">TASK CENTER</p><h1>任务中心</h1><p>查看后台生成、校验和处理任务的实时状态。</p></div></header>
-    <section className="global-panel"><div className="section-head"><div><h2>全部任务</h2><p>{tasks.data?.total ?? 0} 条任务记录</p></div></div><div className="task-table">{tasks.data?.items.map((item) => <article key={item.id}><span className={`task-state ${item.status.toLowerCase()}`}>{item.status}</span><div><strong>{item.type}</strong><small>{item.message}</small></div><div className="mini-progress"><i style={{ width: `${item.progress}%` }} /></div><b>{item.progress}%</b></article>)}{tasks.data?.total === 0 && <p className="empty-line">暂无后台任务。进入项目的“多模型校验”即可创建任务。</p>}</div></section>
+    <section className="global-panel"><div className="section-head"><div><h2>全部任务</h2><p>{tasks.data?.total ?? 0} 条任务记录</p></div><select className="task-filter" value={taskFilter} onChange={event=>setTaskFilter(event.target.value)}><option value="ALL">全部状态</option><option value="RUNNING">运行中</option><option value="FAILED">失败</option><option value="SUCCESS">成功</option><option value="CANCELLED">已取消</option></select></div><div className="task-table">{tasks.data?.items.filter(item=>taskFilter==='ALL'||item.status===taskFilter).map((item) => <article key={item.id}><span className={`task-state ${item.status.toLowerCase()}`}>{item.status}</span><div><strong>{item.type}</strong><small>{item.error||item.message}</small><time>{new Date(item.createdAt).toLocaleString('zh-CN')}</time></div><div className="mini-progress"><i style={{ width: `${item.progress}%` }} /></div>{['FAILED','CANCELLED'].includes(item.status)?<button className="task-retry" disabled={retryTask.isPending} onClick={()=>retryTask.mutate(item.id)}>重试</button>:<b>{item.progress}%</b>}</article>)}{tasks.data?.total === 0 && <p className="empty-line">暂无后台任务。进入项目的“多模型校验”即可创建任务。</p>}</div>{retryTask.isError&&<p className="quality-error">{retryTask.error.message}</p>}</section>
   </>
 
   return <>

@@ -98,6 +98,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects/{id}/batch-generation-tasks", a.createBatchGenerationTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/retry", a.retryTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
 	return recoverer(logger, requestLogger(logger, cors(mux)))
 }
@@ -675,6 +676,15 @@ func (a *API) cancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+func (a *API) retryTask(w http.ResponseWriter, r *http.Request) {
+	item, err := a.tasks.Retry(r.PathValue("id"))
+	if err != nil {
+		a.handleTaskError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, item)
+}
+
 func (a *API) taskEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -730,6 +740,10 @@ func (a *API) taskEvents(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleTaskError(w http.ResponseWriter, err error) {
 	if errors.Is(err, task.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	if errors.Is(err, task.ErrNotRetryable) {
+		writeError(w, http.StatusConflict, "TASK_NOT_RETRYABLE", "任务仍在运行、已成功，或服务重启后缺少原执行上下文")
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())

@@ -21,7 +21,10 @@ const (
 	StatusCancelled Status = "CANCELLED"
 )
 
-var ErrNotFound = errors.New("task not found")
+var (
+	ErrNotFound     = errors.New("task not found")
+	ErrNotRetryable = errors.New("task cannot be retried")
+)
 
 type Task struct {
 	ID        string     `json:"id"`
@@ -65,12 +68,20 @@ type Manager struct {
 	events      map[string][]Event
 	cancels     map[string]context.CancelFunc
 	listeners   map[string]map[uint64]chan Event
+	executors   map[string]Executor
 	listenerSeq atomic.Uint64
 	repository  Repository
+	timeout     time.Duration
 }
 
 func NewManager() *Manager {
-	return &Manager{tasks: make(map[string]Task), events: make(map[string][]Event), cancels: make(map[string]context.CancelFunc), listeners: make(map[string]map[uint64]chan Event)}
+	return &Manager{tasks: make(map[string]Task), events: make(map[string][]Event), cancels: make(map[string]context.CancelFunc), listeners: make(map[string]map[uint64]chan Event), executors: make(map[string]Executor), timeout: 15 * time.Minute}
+}
+
+func (m *Manager) SetTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		m.timeout = timeout
+	}
 }
 
 func NewManagerWithRepository(repository Repository) *Manager {
@@ -89,11 +100,28 @@ func (m *Manager) Create(projectID, taskType string, executor Executor) Task {
 	m.mu.Lock()
 	m.tasks[item.ID] = item
 	m.cancels[item.ID] = cancel
+	m.executors[item.ID] = executor
 	m.mu.Unlock()
 	m.persistTask(item)
 	m.publish(item.ID, "task.created", 0, item.Message)
 	go m.execute(ctx, item.ID, executor)
 	return item
+}
+
+func (m *Manager) Retry(id string) (Task, error) {
+	m.mu.RLock()
+	item, ok := m.tasks[id]
+	executor := m.executors[id]
+	m.mu.RUnlock()
+	if !ok || executor == nil {
+		return Task{}, ErrNotRetryable
+	}
+	if item.Status != StatusFailed && item.Status != StatusCancelled {
+		return Task{}, ErrNotRetryable
+	}
+	retry := m.Create(item.ProjectID, item.Type, executor)
+	m.publish(retry.ID, "task.retry", 0, "重试任务，来源："+id)
+	return retry, nil
 }
 
 func (m *Manager) Get(id string) (Task, error) {
@@ -193,6 +221,11 @@ func (m *Manager) Subscribe(id string) (<-chan Event, func(), error) {
 }
 
 func (m *Manager) execute(ctx context.Context, id string, executor Executor) {
+	if m.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, m.timeout)
+		defer cancel()
+	}
 	now := time.Now().UTC()
 	if !m.transition(id, StatusPending, func(item *Task) {
 		item.Status, item.StartedAt, item.Progress, item.Message = StatusRunning, &now, 1, "任务开始执行"
@@ -208,6 +241,9 @@ func (m *Manager) execute(ctx context.Context, id string, executor Executor) {
 		}
 	})
 	ended := time.Now().UTC()
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		if !m.transition(id, StatusRunning, func(item *Task) {
 			item.Status, item.Error, item.Message, item.EndedAt = StatusFailed, err.Error(), "任务执行失败", &ended
