@@ -1,0 +1,8 @@
+.qodo
+.env
+bin/
+dist/
+node_modules/
+coverage/
+.cache/
+*.log
