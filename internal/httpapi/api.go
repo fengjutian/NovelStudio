@@ -67,6 +67,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects", a.createProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}", a.getProject)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", a.deleteProject)
+	mux.HandleFunc("GET /api/v1/projects/{id}/export.md", a.exportProjectMarkdown)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tree", a.getTree)
 	mux.HandleFunc("POST /api/v1/projects/{id}/nodes", a.createNode)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}", a.updateNode)
@@ -75,6 +76,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects/{id}/documents", a.createDocument)
 	mux.HandleFunc("GET /api/v1/documents/{id}", a.getDocument)
 	mux.HandleFunc("GET /api/v1/documents/{id}/versions", a.listVersions)
+	mux.HandleFunc("GET /api/v1/documents/{id}/diff", a.diffVersions)
 	mux.HandleFunc("POST /api/v1/documents/{id}/versions", a.createVersion)
 	mux.HandleFunc("POST /api/v1/documents/{id}/versions/{versionId}/restore", a.restoreVersion)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/sources", a.listKnowledgeSources)
@@ -844,6 +846,74 @@ func (a *API) listVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) diffVersions(w http.ResponseWriter, r *http.Request) {
+	versions, err := a.docs.Versions(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleDocumentError(w, err)
+		return
+	}
+	byID := make(map[string]document.Version, len(versions))
+	for _, version := range versions {
+		byID[version.ID] = version
+	}
+	from, fromOK := byID[r.URL.Query().Get("from")]
+	to, toOK := byID[r.URL.Query().Get("to")]
+	if !fromOK || !toOK {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "document version not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, document.Diff(from, to))
+}
+
+func (a *API) exportProjectMarkdown(w http.ResponseWriter, r *http.Request) {
+	item, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	documents, err := a.docs.List(r.Context(), item.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	tree, _ := a.store.Tree(r.Context(), item.ID)
+	documentByID := make(map[string]document.Document, len(documents))
+	for _, doc := range documents {
+		documentByID[doc.ID] = doc
+	}
+	ordered := make([]document.Document, 0, len(documents))
+	seen := map[string]bool{}
+	for _, node := range tree {
+		if node.DocumentID != nil && !seen[*node.DocumentID] {
+			if doc, ok := documentByID[*node.DocumentID]; ok {
+				ordered = append(ordered, doc)
+				seen[doc.ID] = true
+			}
+		}
+	}
+	for _, doc := range documents {
+		if !seen[doc.ID] {
+			ordered = append(ordered, doc)
+		}
+	}
+	var output strings.Builder
+	fmt.Fprintf(&output, "# %s\n\n%s\n", item.Name, item.Description)
+	for _, doc := range ordered {
+		versions, versionErr := a.docs.Versions(r.Context(), doc.ID)
+		if versionErr != nil || len(versions) == 0 {
+			continue
+		}
+		fmt.Fprintf(&output, "\n---\n\n# %s\n\n%s\n", doc.Title, versions[0].Content)
+	}
+	filename := regexp.MustCompile(`[^a-zA-Z0-9_-]+`).ReplaceAllString(item.Name, "_")
+	if filename == "" {
+		filename = "content-export"
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.md"`)
+	_, _ = io.WriteString(w, output.String())
 }
 
 func (a *API) createVersion(w http.ResponseWriter, r *http.Request) {

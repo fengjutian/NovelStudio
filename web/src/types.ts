@@ -36,6 +36,8 @@ export interface DocumentVersion {
   createdAt: string
 }
 
+export interface DocumentDiff { fromVersionId:string; toVersionId:string; added:number; deleted:number; lines:Array<{type:'UNCHANGED'|'ADDED'|'DELETED';content:string;oldLine?:number;newLine?:number}> }
+
 export interface KnowledgeSource {
   id: string
   name: string

@@ -21,6 +21,7 @@ export function App() {
   const [selected, setSelected] = useState<Project | null>(null)
   const [selectedTab, setSelectedTab] = useState<WorkspaceTab>('documents')
   const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'tasks' | 'models'>('projects')
+  const [projectQuery, setProjectQuery] = useState('')
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
   const create = useMutation({
     mutationFn: api.createProject,
@@ -67,12 +68,12 @@ export function App() {
           <article><span>待处理问题</span><strong>0</strong><small className="good">质量门禁运行正常</small></article>
         </section>
 
-        <section className="section-head"><div><h2>最近编辑</h2><p>继续你的内容生产流程</p></div><button className="quiet">全部项目 →</button></section>
+        <section className="section-head"><div><h2>最近编辑</h2><p>继续你的内容生产流程</p></div><input className="project-search" value={projectQuery} onChange={(event)=>setProjectQuery(event.target.value)} placeholder="搜索项目名称、类型或描述" /></section>
 
         {projects.isLoading && <div className="empty">正在加载项目…</div>}
         {projects.isError && <div className="empty error">{projects.error.message}</div>}
         <section className="grid">
-          {projects.data?.items.map((project) => {
+          {projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeInfo[project.type].label}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((project) => {
             const info = typeInfo[project.type]
             return <article className="project-card" key={project.id} onClick={() => { setSelectedTab('documents'); setSelected(project) }}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
@@ -83,6 +84,7 @@ export function App() {
               <footer><span>{project.status === 'DRAFT' ? '草稿' : project.status}</span><time>{new Date(project.updatedAt).toLocaleDateString('zh-CN')}</time></footer>
             </article>
           })}
+          {projectQuery && projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeInfo[project.type].label}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).length===0&&<p className="empty-line">没有匹配的项目</p>}
           <button className="new-card" onClick={() => setOpen(true)}><span>＋</span><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
         </section>
         </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} onOpen={(project, tab) => { setSelectedTab(tab); setSelected(project) }} />}
@@ -166,7 +168,7 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
   const validationResult = activeTask.data?.result
 
   return <div className="workspace-layer">
-    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><span>草稿工作区</span></div>
+    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}>↓ 导出 Markdown</a><span>草稿工作区</span></div>
     <div className="workspace-body">
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'structure' ? 'selected' : ''} onClick={() => setTab('structure')}>内容结构</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><button className={tab === 'runs' ? 'selected' : ''} onClick={() => setTab('runs')}>AI 运行记录</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
@@ -230,7 +232,9 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
   const [baseVersionId, setBaseVersionId] = useState('')
   const [savedContent, setSavedContent] = useState('')
   const [autoSave, setAutoSave] = useState(false)
+  const [compareFrom, setCompareFrom] = useState('')
   const versions = useQuery({ queryKey: ['versions', document.id], queryFn: () => api.versions(document.id) })
+  const diff = useQuery({queryKey:['document-diff',document.id,compareFrom,versions.data?.items[0]?.id],queryFn:()=>api.diffVersions(document.id,compareFrom,versions.data!.items[0].id),enabled:Boolean(compareFrom&&versions.data?.items[0]?.id&&compareFrom!==versions.data?.items[0]?.id)})
   const save = useMutation({
     mutationFn: () => api.saveVersion(document.id, { content, reason: autoSave ? 'AUTO_SAVE' : 'HUMAN_EDIT', expectedVersionId: baseVersionId }),
     onSuccess: (version) => {
@@ -276,6 +280,7 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
   return <section className="document-editor">
     <div className="editor-head"><button onClick={onBack}>← 文档列表</button><div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
     {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
-    <div className="editor-layout"><div className="markdown-pane"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="开始编写 Markdown 内容…" /><footer><span>{content.length} 字符</span><span>{dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复此版本</button>}</article>)}</aside></div>
+    <div className="editor-layout"><div className="markdown-pane"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="开始编写 Markdown 内容…" /><footer><span>{content.length} 字符</span><span>{dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <div className="version-actions"><button className="restore" onClick={() => setCompareFrom(version.id)}>与最新版比较</button><button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复</button></div>}</article>)}</aside></div>
+    {diff.data&&<section className="diff-panel"><header><div><h3>版本差异</h3><small>新增 {diff.data.added} 行 · 删除 {diff.data.deleted} 行</small></div><button onClick={()=>setCompareFrom('')}>关闭</button></header><pre>{diff.data.lines.map((line,index)=><span className={line.type.toLowerCase()} key={`${index}-${line.oldLine}-${line.newLine}`}><i>{line.oldLine??' '}</i><i>{line.newLine??' '}</i><b>{line.type==='ADDED'?'+':line.type==='DELETED'?'-':' '}</b>{line.content||' '}</span>)}</pre></section>}
   </section>
 }

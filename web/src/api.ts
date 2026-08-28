@@ -1,4 +1,4 @@
-import type { AIRunList, AITask, ContentNode, Document, DocumentVersion, Fact, GenerationResult, KnowledgeSource, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
+import type { AIRunList, AITask, ContentNode, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeSource, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -20,6 +20,8 @@ export const api = {
   createDocument: (projectId: string, input: { title: string; content: string }) =>
     request<{ document: Document }>(`/api/v1/projects/${projectId}/documents`, { method: 'POST', body: JSON.stringify(input) }),
   versions: (documentId: string) => request<{ items: DocumentVersion[]; total: number }>(`/api/v1/documents/${documentId}/versions`),
+  diffVersions: (documentId:string,from:string,to:string) => request<DocumentDiff>(`/api/v1/documents/${documentId}/diff?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  exportURL: (projectId:string) => `/api/v1/projects/${projectId}/export.md`,
   saveVersion: (documentId: string, input: { content: string; reason: string; expectedVersionId: string }) =>
     request<DocumentVersion>(`/api/v1/documents/${documentId}/versions`, { method: 'POST', body: JSON.stringify(input) }),
   restoreVersion: (documentId: string, versionId: string) =>
