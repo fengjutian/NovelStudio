@@ -1,7 +1,42 @@
 package mysql
 
-import("context";"database/sql";"encoding/json";"novelstudio/internal/qualityhistory")
-type QualityStore struct{DB *sql.DB}
-var _ qualityhistory.Store=QualityStore{}
-func(s QualityStore)Save(ctx context.Context,item qualityhistory.Record)error{raw,err:=json.Marshal(item.Result);if err!=nil{return err};_,err=s.DB.ExecContext(ctx,`INSERT INTO validation_results(id,project_id,document_id,version_id,text_hash,score,verdict,gate_status,result,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,item.ID,item.ProjectID,nullable(item.DocumentID),nullable(item.VersionID),item.TextHash,item.Score,item.Verdict,item.GateStatus,raw,item.CreatedAt);return err}
-func(s QualityStore)List(ctx context.Context,projectID string,limit int)([]qualityhistory.Record,error){if limit<1||limit>200{limit=50};rows,err:=s.DB.QueryContext(ctx,`SELECT id,project_id,COALESCE(document_id,''),COALESCE(version_id,''),text_hash,score,verdict,gate_status,result,created_at FROM validation_results WHERE (?='' OR project_id=?) ORDER BY created_at DESC LIMIT ?`,projectID,projectID,limit);if err!=nil{return nil,err};defer rows.Close();items:=[]qualityhistory.Record{};for rows.Next(){var item qualityhistory.Record;var raw []byte;if err:=rows.Scan(&item.ID,&item.ProjectID,&item.DocumentID,&item.VersionID,&item.TextHash,&item.Score,&item.Verdict,&item.GateStatus,&raw,&item.CreatedAt);err!=nil{return nil,err};_ = json.Unmarshal(raw,&item.Result);items=append(items,item)};return items,rows.Err()}
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"novelstudio/internal/qualityhistory"
+)
+
+type QualityStore struct{ DB *sql.DB }
+
+var _ qualityhistory.Store = QualityStore{}
+
+func (s QualityStore) Save(ctx context.Context, item qualityhistory.Record) error {
+	raw, err := json.Marshal(item.Result)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO validation_results(id,project_id,document_id,version_id,text_hash,score,verdict,gate_status,result,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.ID, item.ProjectID, nullable(item.DocumentID), nullable(item.VersionID), item.TextHash, item.Score, item.Verdict, item.GateStatus, raw, item.CreatedAt)
+	return err
+}
+func (s QualityStore) List(ctx context.Context, projectID string, limit int) ([]qualityhistory.Record, error) {
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,project_id,COALESCE(document_id,''),COALESCE(version_id,''),text_hash,score,verdict,gate_status,result,created_at FROM validation_results WHERE (?='' OR project_id=?) ORDER BY created_at DESC LIMIT ?`, projectID, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []qualityhistory.Record{}
+	for rows.Next() {
+		var item qualityhistory.Record
+		var raw []byte
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.DocumentID, &item.VersionID, &item.TextHash, &item.Score, &item.Verdict, &item.GateStatus, &raw, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(raw, &item.Result)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

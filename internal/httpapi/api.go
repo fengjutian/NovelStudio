@@ -59,7 +59,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	if tasks == nil {
 		tasks = task.NewManager()
 	}
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs:runs, quality:quality, logger: logger}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -85,8 +85,8 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
 	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
-	mux.HandleFunc("GET /api/v1/projects/{id}/ai-runs",a.listAIRuns)
-	mux.HandleFunc("GET /api/v1/projects/{id}/quality-results",a.listQualityResults)
+	mux.HandleFunc("GET /api/v1/projects/{id}/ai-runs", a.listAIRuns)
+	mux.HandleFunc("GET /api/v1/projects/{id}/quality-results", a.listQualityResults)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
@@ -243,6 +243,10 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 				return nil, saveErr
 			}
 			documents = append(documents, doc)
+			documentID := doc.ID
+			if _, updateErr := a.store.UpdateNode(ctx, node.ID, project.UpdateNodeInput{Title: node.Title, Position: node.Position, Metadata: node.Metadata, DocumentID: &documentID}); updateErr != nil {
+				return nil, updateErr
+			}
 			progress(75+(index+1)*20/len(nodes), "已保存 "+node.Title)
 		}
 		return map[string]any{"documents": documents, "generations": outputs}, nil
@@ -381,7 +385,7 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
-	reviewRequest := validation.ReviewRequest{Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
+	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
 		if searchErr != nil {
@@ -409,7 +413,7 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		if saveErr != nil {
 			return nil, saveErr
 		}
-		a.saveQuality(ctx,projectItem.ID,doc.ID,version.ID,result.Content,result.Validation)
+		a.saveQuality(ctx, projectItem.ID, doc.ID, version.ID, result.Content, result.Validation)
 		return map[string]any{"workflow": result, "document": doc, "version": version}, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
@@ -434,9 +438,43 @@ func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured, "generationOperations": generationOperations})
 }
 
-func(a *API)listAIRuns(w http.ResponseWriter,r *http.Request){if a.runs==nil{writeJSON(w,http.StatusOK,map[string]any{"items":[]any{},"total":0});return};items,err:=a.runs.List(r.Context(),r.PathValue("id"),100);if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return};input,output:=0,0;latency:=int64(0);for _,item:=range items{input+=item.InputTokens;output+=item.OutputTokens;latency+=item.LatencyMs};writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items),"stats":map[string]any{"inputTokens":input,"outputTokens":output,"latencyMs":latency}})}
-func(a *API)listQualityResults(w http.ResponseWriter,r *http.Request){if a.quality==nil{writeJSON(w,http.StatusOK,map[string]any{"items":[]any{},"total":0});return};items,err:=a.quality.List(r.Context(),r.PathValue("id"),100);if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items)})}
-func(a *API)saveQuality(ctx context.Context,projectID,documentID,versionID,text string,result validation.PipelineResult){if a.quality==nil{return};_ = a.quality.Save(ctx,qualityhistory.Record{ID:qualityhistory.NewID(),ProjectID:projectID,DocumentID:documentID,VersionID:versionID,TextHash:fmt.Sprintf("%x",sha256.Sum256([]byte(text))),Score:result.Result.Score,Verdict:result.Result.Verdict,GateStatus:result.Gate.Status,Result:result,CreatedAt:time.Now().UTC()})}
+func (a *API) listAIRuns(w http.ResponseWriter, r *http.Request) {
+	if a.runs == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := a.runs.List(r.Context(), r.PathValue("id"), 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	input, output := 0, 0
+	latency := int64(0)
+	for _, item := range items {
+		input += item.InputTokens
+		output += item.OutputTokens
+		latency += item.LatencyMs
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items), "stats": map[string]any{"inputTokens": input, "outputTokens": output, "latencyMs": latency}})
+}
+func (a *API) listQualityResults(w http.ResponseWriter, r *http.Request) {
+	if a.quality == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "total": 0})
+		return
+	}
+	items, err := a.quality.List(r.Context(), r.PathValue("id"), 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+func (a *API) saveQuality(ctx context.Context, projectID, documentID, versionID, text string, result validation.PipelineResult) {
+	if a.quality == nil {
+		return
+	}
+	_ = a.quality.Save(ctx, qualityhistory.Record{ID: qualityhistory.NewID(), ProjectID: projectID, DocumentID: documentID, VersionID: versionID, TextHash: fmt.Sprintf("%x", sha256.Sum256([]byte(text))), Score: result.Result.Score, Verdict: result.Result.Verdict, GateStatus: result.Gate.Status, Result: result, CreatedAt: time.Now().UTC()})
+}
 
 func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 	if a.generator == nil {
@@ -467,7 +505,7 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "model is not configured for "+string(input.Operation))
 		return
 	}
-	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), Instruction: input.Instruction, Content: input.Content}
+	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
 		if searchErr != nil {
@@ -551,7 +589,7 @@ func (a *API) validateText(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "VALIDATION_FAILED", err.Error())
 		return
 	}
-	a.saveQuality(r.Context(),r.PathValue("id"),"","",request.Text,result)
+	a.saveQuality(r.Context(), r.PathValue("id"), "", "", request.Text, result)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -572,7 +610,7 @@ func (a *API) createValidationTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		a.saveQuality(ctx,projectID,"","",request.Text,result)
+		a.saveQuality(ctx, projectID, "", "", request.Text, result)
 		progress(90, "质量门禁计算完成")
 		return result, nil
 	})
@@ -916,7 +954,7 @@ func cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

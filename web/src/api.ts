@@ -1,4 +1,4 @@
-import type { AITask, ContentNode, Document, DocumentVersion, Fact, GenerationResult, KnowledgeSource, PipelineResult, Project, ProjectList, ProjectType, SearchHit } from './types'
+import type { AIRunList, AITask, ContentNode, Document, DocumentVersion, Fact, GenerationResult, KnowledgeSource, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -39,9 +39,12 @@ export const api = {
   cancelTask: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}/cancel`, { method: 'POST' }),
   tree: (projectId:string) => request<{items:ContentNode[]}>(`/api/v1/projects/${projectId}/tree`),
   createNode: (projectId:string,input:{parentId?:string;nodeType:string;title:string;position:number}) => request<ContentNode>(`/api/v1/projects/${projectId}/nodes`,{method:'POST',body:JSON.stringify(input)}),
+  updateNode: (id:string,input:{title:string;position:number;metadata?:Record<string,unknown>;documentId?:string}) => request<ContentNode>(`/api/v1/nodes/${id}`,{method:'PUT',body:JSON.stringify(input)}),
   deleteNode: (id:string) => request<void>(`/api/v1/nodes/${id}`,{method:'DELETE'}),
   batchGenerate: (projectId:string,input:{nodeIds:string[];instruction:string;knowledgeQuery:string;windowSize:number}) => request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/batch-generation-tasks`,{method:'POST',body:JSON.stringify(input)}),
-  qualityGenerate: (projectId:string,input:{instruction:string;title:string;knowledgeQuery:string;maxRepairs:number}) => request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/quality-generation-tasks`,{method:'POST',body:JSON.stringify(input)}),
+  qualityGenerate: (projectId:string,input:{instruction:string;title:string;knowledgeQuery:string;maxRepairs:number}) => request<AITask<QualityGenerationResult>>(`/api/v1/projects/${projectId}/quality-generation-tasks`,{method:'POST',body:JSON.stringify(input)}),
+  aiRuns: (projectId:string) => request<AIRunList>(`/api/v1/projects/${projectId}/ai-runs`),
+  qualityResults: (projectId:string) => request<{items:QualityRecord[];total:number}>(`/api/v1/projects/${projectId}/quality-results`),
   facts: (projectId:string) => request<{items:Fact[];total:number}>(`/api/v1/projects/${projectId}/knowledge/facts`),
   updateFact: (id:string,status:string) => request<Fact>(`/api/v1/facts/${id}/status`,{method:'PUT',body:JSON.stringify({status})}),
   extractFacts: (projectId:string,documentId:string) => request<AITask>(`/api/v1/projects/${projectId}/fact-extraction-tasks`,{method:'POST',body:JSON.stringify({documentId})}),

@@ -52,10 +52,12 @@ func (s *MemoryStore) UpdateNode(_ context.Context, id string, input UpdateNodeI
 				if input.Position > 0 {
 					item.Position = input.Position
 				}
-			if input.Metadata != nil {
-				item.Metadata = input.Metadata
-			}
-			if input.DocumentID != nil { item.DocumentID=input.DocumentID }
+				if input.Metadata != nil {
+					item.Metadata = input.Metadata
+				}
+				if input.DocumentID != nil {
+					item.DocumentID = input.DocumentID
+				}
 				s.nodes[projectID][index] = item
 				return item, nil
 			}

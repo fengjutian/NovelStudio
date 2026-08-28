@@ -105,7 +105,7 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, q
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB:db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
 func validationPipeline(recorder airun.Recorder) *validation.Pipeline {
