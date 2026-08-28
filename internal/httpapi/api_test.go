@@ -2,15 +2,21 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"novelstudio/internal/document"
 	"novelstudio/internal/httpapi"
+	"novelstudio/internal/knowledge"
 	"novelstudio/internal/project"
+	"novelstudio/internal/task"
+	"novelstudio/internal/validation"
 )
 
 func TestProjectLifecycle(t *testing.T) {
@@ -92,4 +98,41 @@ func TestDocumentAndKnowledgeLifecycle(t *testing.T) {
 
 type projectDocument struct {
 	ID string `json:"id"`
+}
+
+type fixedReviewer struct{}
+
+func (fixedReviewer) Review(context.Context, validation.ReviewRequest) (validation.Result, validation.Run, error) {
+	return validation.Result{Score: 91, Verdict: "PASS", Dimensions: map[string]int{"groundedness": 90}, Issues: []validation.Issue{}}, validation.Run{Status: "SUCCESS", Model: "test-model"}, nil
+}
+
+func TestAsyncValidationTask(t *testing.T) {
+	projects := project.NewMemoryStore()
+	pipeline := &validation.Pipeline{Validators: []validation.NamedReviewer{{Name: "A", Reviewer: fixedReviewer{}}}}
+	handler := httpapi.NewWithStores(projects, document.NewMemoryStore(), knowledge.NewMemoryStore(), pipeline, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	list, _ := projects.List(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+list[0].ID+"/validation-tasks", bytes.NewBufferString(`{"text":"verified text","task":"check"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create task status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created task.Task
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		get := httptest.NewRecorder()
+		handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+created.ID, nil))
+		var current task.Task
+		if err := json.NewDecoder(get.Body).Decode(&current); err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == task.StatusSuccess {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("validation task did not complete")
 }

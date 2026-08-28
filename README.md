@@ -13,6 +13,7 @@
 - OpenAI-Compatible 模型适配与 JSON Schema 结构化输出
 - 多 Validator 并行独立校验、重大分歧 Judge 仲裁
 - 知识证据注入、评分聚合和硬规则质量门禁
+- 后台任务状态机、取消、结果保存和 SSE 断线续传
 - 零外部依赖的内存存储，便于先验证产品闭环
 
 当前使用内存仓储，数据在 API 重启后会重置；MySQL、Redis 和真实模型调用将在后续增量接入。
@@ -64,6 +65,11 @@ POST   /api/v1/projects/{id}/knowledge/sources
 GET    /api/v1/projects/{id}/knowledge/search?q=关键词
 GET    /api/v1/models/status
 POST   /api/v1/projects/{id}/validate
+GET    /api/v1/projects/{id}/tasks
+POST   /api/v1/projects/{id}/validation-tasks
+GET    /api/v1/tasks/{id}
+POST   /api/v1/tasks/{id}/cancel
+GET    /api/v1/tasks/{id}/events
 ```
 
 创建项目示例：

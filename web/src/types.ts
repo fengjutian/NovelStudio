@@ -58,3 +58,15 @@ export interface PipelineResult {
   gate: { status: 'PASS' | 'WARNING' | 'FAIL'; reasons: string[] }
   runs: Array<{ role: string; provider: string; model: string; latencyMs: number; status: string }>
 }
+
+export interface AITask {
+  id: string
+  projectId: string
+  type: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
+  progress: number
+  message: string
+  result?: PipelineResult
+  error?: string
+  createdAt: string
+}

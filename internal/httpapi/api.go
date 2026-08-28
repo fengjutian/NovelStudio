@@ -1,16 +1,20 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"novelstudio/internal/document"
 	"novelstudio/internal/knowledge"
 	"novelstudio/internal/project"
+	"novelstudio/internal/task"
 	"novelstudio/internal/validation"
 )
 
@@ -19,6 +23,7 @@ type API struct {
 	docs      document.Store
 	knowledge knowledge.Store
 	pipeline  *validation.Pipeline
+	tasks     *task.Manager
 	logger    *slog.Logger
 }
 
@@ -31,7 +36,7 @@ func NewWithPipeline(store project.Store, pipeline *validation.Pipeline, logger 
 }
 
 func NewWithStores(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, logger *slog.Logger) http.Handler {
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, logger: logger}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, tasks: task.NewManager(), logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -51,6 +56,11 @@ func NewWithStores(store project.Store, docs document.Store, knowledgeStore know
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/search", a.searchKnowledge)
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
+	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
+	mux.HandleFunc("POST /api/v1/projects/{id}/validation-tasks", a.createValidationTask)
+	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
+	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
 	return recoverer(logger, requestLogger(logger, cors(mux)))
 }
 
@@ -70,10 +80,46 @@ func (a *API) validateText(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "validation models are not configured")
 		return
 	}
+	request, ok := a.decodeReviewRequest(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	result, err := a.pipeline.Validate(r.Context(), request)
+	if err != nil {
+		a.logger.Error("validation pipeline failed", "projectId", r.PathValue("id"), "error", err)
+		writeError(w, http.StatusBadGateway, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) createValidationTask(w http.ResponseWriter, r *http.Request) {
+	if a.pipeline == nil {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "validation models are not configured")
+		return
+	}
 	projectID := r.PathValue("id")
+	request, ok := a.decodeReviewRequest(w, r, projectID)
+	if !ok {
+		return
+	}
+	item := a.tasks.Create(projectID, "TEXT_VALIDATE", func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(10, "知识证据准备完成")
+		progress(20, "Validator 开始独立校验")
+		result, err := a.pipeline.Validate(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		progress(90, "质量门禁计算完成")
+		return result, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
+}
+
+func (a *API) decodeReviewRequest(w http.ResponseWriter, r *http.Request, projectID string) (validation.ReviewRequest, bool) {
 	if _, err := a.store.Get(r.Context(), projectID); err != nil {
 		a.handleStoreError(w, err)
-		return
+		return validation.ReviewRequest{}, false
 	}
 	var input struct {
 		Text           string   `json:"text"`
@@ -82,26 +128,103 @@ func (a *API) validateText(w http.ResponseWriter, r *http.Request) {
 		Dimensions     []string `json:"dimensions"`
 	}
 	if !decodeJSON(w, r, &input) {
-		return
+		return validation.ReviewRequest{}, false
 	}
 	request := validation.ReviewRequest{Text: input.Text, Task: input.Task, Dimensions: input.Dimensions}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, err := a.knowledge.Search(r.Context(), projectID, input.KnowledgeQuery, 8)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
-			return
+			return validation.ReviewRequest{}, false
 		}
 		for _, hit := range hits {
 			request.Evidence = append(request.Evidence, validation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
 		}
 	}
-	result, err := a.pipeline.Validate(r.Context(), request)
+	return request, true
+}
+
+func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
+	items := a.tasks.List(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
+	item, err := a.tasks.Get(r.PathValue("id"))
 	if err != nil {
-		a.logger.Error("validation pipeline failed", "projectId", projectID, "error", err)
-		writeError(w, http.StatusBadGateway, "VALIDATION_FAILED", err.Error())
+		a.handleTaskError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) cancelTask(w http.ResponseWriter, r *http.Request) {
+	if err := a.tasks.Cancel(r.PathValue("id")); err != nil {
+		a.handleTaskError(w, err)
+		return
+	}
+	item, _ := a.tasks.Get(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) taskEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "SSE_UNSUPPORTED", "streaming is unsupported")
+		return
+	}
+	lastID, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
+	if queryID, err := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64); err == nil && queryID > lastID {
+		lastID = queryID
+	}
+	stream, unsubscribe, err := a.tasks.Subscribe(r.PathValue("id"))
+	if err != nil {
+		a.handleTaskError(w, err)
+		return
+	}
+	defer unsubscribe()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	send := func(event task.Event) {
+		raw, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, raw)
+		flusher.Flush()
+		lastID = event.ID
+	}
+	replay, _ := a.tasks.EventsSince(r.PathValue("id"), lastID)
+	for _, event := range replay {
+		send(event)
+	}
+	if item, _ := a.tasks.Get(r.PathValue("id")); item.Status == task.StatusSuccess || item.Status == task.StatusFailed || item.Status == task.StatusCancelled {
+		return
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event := <-stream:
+			if event.ID > lastID {
+				send(event)
+			}
+			if event.Type == "task.completed" || event.Type == "task.failed" || event.Type == "task.cancelled" {
+				return
+			}
+		case <-heartbeat.C:
+			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (a *API) handleTaskError(w http.ResponseWriter, err error) {
+	if errors.Is(err, task.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
