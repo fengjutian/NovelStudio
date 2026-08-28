@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"novelstudio/internal/airun"
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/httpapi"
@@ -16,15 +17,16 @@ import (
 	"novelstudio/internal/llm"
 	mysqlstore "novelstudio/internal/persistence/mysql"
 	"novelstudio/internal/project"
+	"novelstudio/internal/promptcatalog"
 	"novelstudio/internal/validation"
 )
 
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
-	projectStore, documentStore, knowledgeStore, closeStore := stores()
+	projectStore, documentStore, knowledgeStore, runRecorder, closeStore := stores()
 	defer closeStore()
 	pipeline := validationPipeline()
-	generator := generationService()
+	generator := generationService(runRecorder)
 	handler := httpapi.NewWithServices(projectStore, documentStore, knowledgeStore, pipeline, generator, slog.Default())
 
 	server := &http.Server{
@@ -45,7 +47,7 @@ func main() {
 	}
 }
 
-func generationService() *generation.Service {
+func generationService(recorder airun.Recorder) *generation.Service {
 	baseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))
 	if baseURL == "" {
 		return nil
@@ -61,6 +63,8 @@ func generationService() *generation.Service {
 		generation.OperationOutline: first(strings.TrimSpace(os.Getenv("OUTLINER_MODEL")), writerModel),
 		generation.OperationWrite:   writerModel,
 		generation.OperationPolish:  first(strings.TrimSpace(os.Getenv("POLISHER_MODEL")), writerModel),
+		generation.OperationRepair:  first(strings.TrimSpace(os.Getenv("REPAIR_MODEL")), writerModel),
+		generation.OperationExtract: first(strings.TrimSpace(os.Getenv("EXTRACTOR_MODEL")), writerModel),
 	}
 	configured := false
 	for _, model := range models {
@@ -70,7 +74,7 @@ func generationService() *generation.Service {
 		slog.Warn("content generation disabled; configure WRITER_MODEL or role-specific models")
 		return nil
 	}
-	return &generation.Service{ProviderName: "openai-compatible", Provider: provider, Models: models}
+	return &generation.Service{ProviderName: "openai-compatible", Provider: provider, Models: models, Recorder: recorder, Prompts: promptcatalog.Catalog{Dir: os.Getenv("PROMPT_DIR")}}
 }
 
 func first(values ...string) string {
@@ -82,11 +86,11 @@ func first(values ...string) string {
 	return ""
 }
 
-func stores() (project.Store, document.Store, knowledge.Store, func()) {
+func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
 		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
-		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), func() {}
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), func() {}
 	}
 	db, err := mysqlstore.Open(context.Background(), dsn)
 	if err != nil {
@@ -99,7 +103,7 @@ func stores() (project.Store, document.Store, knowledge.Store, func()) {
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, func() { _ = db.Close() }
 }
 
 func validationPipeline() *validation.Pipeline {

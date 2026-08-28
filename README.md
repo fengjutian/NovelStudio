@@ -14,6 +14,9 @@
 - OpenAI-Compatible 模型适配与 JSON Schema 结构化输出
 - Planner、Outliner、Writer、Polisher 内容生成任务
 - 基于知识证据生成并自动创建文档或版本
+- 外部版本化 Prompt、AI Run 持久化、自动修复与再校验
+- 结构化事实抽取和人工审核
+- 内容树编辑、窗口式批量生成、知识文件上传
 - 多 Validator 并行独立校验、重大分歧 Judge 仲裁
 - 知识证据注入、评分聚合和硬规则质量门禁
 - 后台任务状态机、取消、结果保存和 SSE 断线续传
@@ -95,6 +98,15 @@ POST   /api/v1/projects/{id}/validate
 GET    /api/v1/projects/{id}/tasks
 POST   /api/v1/projects/{id}/validation-tasks
 POST   /api/v1/projects/{id}/generation-tasks
+POST   /api/v1/projects/{id}/quality-generation-tasks
+POST   /api/v1/projects/{id}/batch-generation-tasks
+POST   /api/v1/projects/{id}/fact-extraction-tasks
+GET    /api/v1/projects/{id}/knowledge/facts
+PUT    /api/v1/facts/{id}/status
+POST   /api/v1/projects/{id}/knowledge/files
+POST   /api/v1/projects/{id}/nodes
+PUT    /api/v1/nodes/{id}
+DELETE /api/v1/nodes/{id}
 GET    /api/v1/tasks/{id}
 POST   /api/v1/tasks/{id}/cancel
 GET    /api/v1/tasks/{id}/events

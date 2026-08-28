@@ -39,3 +39,15 @@ type ContentNode struct {
 	Position  int            `json:"position"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
+type CreateNodeInput struct {
+	ParentID *string        `json:"parentId"`
+	NodeType string         `json:"nodeType"`
+	Title    string         `json:"title"`
+	Position int            `json:"position"`
+	Metadata map[string]any `json:"metadata"`
+}
+type UpdateNodeInput struct {
+	Title    string         `json:"title"`
+	Position int            `json:"position"`
+	Metadata map[string]any `json:"metadata"`
+}

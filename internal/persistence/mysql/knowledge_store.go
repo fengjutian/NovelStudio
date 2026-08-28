@@ -15,6 +15,63 @@ type KnowledgeStore struct{ DB *sql.DB }
 
 var _ knowledge.Store = KnowledgeStore{}
 
+func (s KnowledgeStore) CreateFacts(ctx context.Context, projectID string, inputs []knowledge.CreateFactInput) ([]knowledge.Fact, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	items := []knowledge.Fact{}
+	for _, input := range inputs {
+		if strings.TrimSpace(input.Subject) == "" || strings.TrimSpace(input.Predicate) == "" || strings.TrimSpace(input.Object) == "" {
+			continue
+		}
+		item := knowledge.Fact{ID: newID("fac"), ProjectID: projectID, Subject: input.Subject, Predicate: input.Predicate, Object: input.Object, SourceChunkID: input.SourceChunkID, Confidence: input.Confidence, Status: "PROPOSED", CreatedAt: now, UpdatedAt: now}
+		_, err = tx.ExecContext(ctx, `INSERT INTO knowledge_facts(id,project_id,subject,predicate,object,source_version_id,confidence,status,created_at,updated_at) VALUES(?,?,?,?,?,NULL,?,'PROPOSED',?,?)`, item.ID, projectID, item.Subject, item.Predicate, item.Object, item.Confidence, now, now)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+func (s KnowledgeStore) ListFacts(ctx context.Context, projectID string) ([]knowledge.Fact, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,project_id,subject,predicate,object,COALESCE(source_version_id,''),confidence,status,created_at,updated_at FROM knowledge_facts WHERE project_id=? ORDER BY created_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []knowledge.Fact{}
+	for rows.Next() {
+		var item knowledge.Fact
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Subject, &item.Predicate, &item.Object, &item.SourceChunkID, &item.Confidence, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+func (s KnowledgeStore) UpdateFactStatus(ctx context.Context, id, status string) (knowledge.Fact, error) {
+	if status != "CONFIRMED" && status != "REJECTED" && status != "SUPERSEDED" {
+		return knowledge.Fact{}, errors.New("invalid fact status")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE knowledge_facts SET status=?,updated_at=? WHERE id=?`, status, time.Now().UTC(), id)
+	if err != nil {
+		return knowledge.Fact{}, err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return knowledge.Fact{}, knowledge.ErrNotFound
+	}
+	var item knowledge.Fact
+	err = s.DB.QueryRowContext(ctx, `SELECT id,project_id,subject,predicate,object,COALESCE(source_version_id,''),confidence,status,created_at,updated_at FROM knowledge_facts WHERE id=?`, id).Scan(&item.ID, &item.ProjectID, &item.Subject, &item.Predicate, &item.Object, &item.SourceChunkID, &item.Confidence, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
 func (s KnowledgeStore) ListSources(ctx context.Context, projectID string) ([]knowledge.Source, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,knowledge_base_id,name,source_type,version,authority,status,content_hash,created_at FROM knowledge_sources WHERE project_id=? ORDER BY created_at DESC`, projectID)
 	if err != nil {

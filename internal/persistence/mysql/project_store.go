@@ -15,6 +15,58 @@ type ProjectStore struct{ DB *sql.DB }
 
 var _ project.Store = ProjectStore{}
 
+func (s ProjectStore) CreateNode(ctx context.Context, projectID string, input project.CreateNodeInput) (project.ContentNode, error) {
+	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.NodeType) == "" {
+		return project.ContentNode{}, errors.New("title and nodeType are required")
+	}
+	if input.Position < 1 {
+		_ = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),0)+1 FROM content_nodes WHERE project_id=? AND parent_id <=> ?`, projectID, input.ParentID).Scan(&input.Position)
+	}
+	item := project.ContentNode{ID: newID("nod"), ProjectID: projectID, ParentID: input.ParentID, NodeType: strings.ToUpper(input.NodeType), Title: strings.TrimSpace(input.Title), Position: input.Position, Metadata: input.Metadata}
+	now := time.Now().UTC()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO content_nodes(id,project_id,parent_id,node_type,title,position,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, item.ID, projectID, input.ParentID, item.NodeType, item.Title, item.Position, metadataJSON(item.Metadata), now, now)
+	return item, err
+}
+func (s ProjectStore) UpdateNode(ctx context.Context, id string, input project.UpdateNodeInput) (project.ContentNode, error) {
+	var current project.ContentNode
+	var parent sql.NullString
+	var metadata []byte
+	err := s.DB.QueryRowContext(ctx, `SELECT id,project_id,parent_id,node_type,title,position,metadata FROM content_nodes WHERE id=?`, id).Scan(&current.ID, &current.ProjectID, &parent, &current.NodeType, &current.Title, &current.Position, &metadata)
+	if errors.Is(err, sql.ErrNoRows) {
+		return project.ContentNode{}, project.ErrNotFound
+	}
+	if err != nil {
+		return project.ContentNode{}, err
+	}
+	if parent.Valid {
+		current.ParentID = &parent.String
+	}
+	if strings.TrimSpace(input.Title) != "" {
+		current.Title = strings.TrimSpace(input.Title)
+	}
+	if input.Position > 0 {
+		current.Position = input.Position
+	}
+	if input.Metadata != nil {
+		current.Metadata = input.Metadata
+	} else if len(metadata) > 0 {
+		_ = json.Unmarshal(metadata, &current.Metadata)
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE content_nodes SET title=?,position=?,metadata=?,updated_at=? WHERE id=?`, current.Title, current.Position, metadataJSON(current.Metadata), time.Now().UTC(), id)
+	return current, err
+}
+func (s ProjectStore) DeleteNode(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM content_nodes WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return project.ErrNotFound
+	}
+	return nil
+}
+
 func (s ProjectStore) List(ctx context.Context) ([]project.Project, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, project_type, description, status, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY updated_at DESC`)
 	if err != nil {

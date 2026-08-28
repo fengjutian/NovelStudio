@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"novelstudio/internal/airun"
 	"novelstudio/internal/llm"
+	"novelstudio/internal/promptcatalog"
 )
 
 type Operation string
@@ -17,10 +19,12 @@ const (
 	OperationOutline Operation = "OUTLINE"
 	OperationWrite   Operation = "WRITE"
 	OperationPolish  Operation = "POLISH"
+	OperationRepair  Operation = "REPAIR"
+	OperationExtract Operation = "EXTRACT"
 )
 
 func (o Operation) Valid() bool {
-	return o == OperationPlan || o == OperationOutline || o == OperationWrite || o == OperationPolish
+	return o == OperationPlan || o == OperationOutline || o == OperationWrite || o == OperationPolish || o == OperationRepair || o == OperationExtract
 }
 
 type Request struct {
@@ -29,6 +33,8 @@ type Request struct {
 	Instruction string     `json:"instruction"`
 	Content     string     `json:"content,omitempty"`
 	Evidence    []Evidence `json:"evidence,omitempty"`
+	ProjectID   string     `json:"projectId,omitempty"`
+	TaskID      string     `json:"taskId,omitempty"`
 }
 
 type Evidence struct {
@@ -55,6 +61,8 @@ type Service struct {
 	ProviderName string
 	Provider     llm.Provider
 	Models       map[Operation]string
+	Prompts      promptcatalog.Catalog
+	Recorder     airun.Recorder
 }
 
 func (s Service) Configured(operation Operation) bool {
@@ -72,8 +80,13 @@ func (s Service) Generate(ctx context.Context, request Request) (Result, error) 
 	if s.Provider == nil || model == "" {
 		return Result{}, fmt.Errorf("model is not configured for %s", request.Operation)
 	}
-	promptVersion := "v1"
-	messages := []llm.Message{{Role: "system", Content: systemPrompt(request.Operation, request.ProjectType)}}
+	promptName := strings.ToLower(string(request.Operation))
+	system, promptVersion, err := s.Prompts.Load(promptName)
+	if err != nil {
+		return Result{}, err
+	}
+	system += "\n项目类型：" + request.ProjectType
+	messages := []llm.Message{{Role: "system", Content: system}}
 	contextText, evidenceIDs := buildContext(request.Evidence)
 	userPrompt := "创作要求：\n" + request.Instruction
 	if contextText != "" {
@@ -85,30 +98,24 @@ func (s Service) Generate(ctx context.Context, request Request) (Result, error) 
 	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
 	start := time.Now()
 	response, err := s.Provider.Generate(ctx, llm.GenerateRequest{Model: model, Messages: messages, Temperature: temperature(request.Operation), MaxTokens: 8000})
+	latency := time.Since(start).Milliseconds()
 	if err != nil {
+		s.record(ctx, request, model, promptVersion, llm.GenerateResponse{}, latency, "FAILED", err.Error())
 		return Result{}, err
 	}
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
 		return Result{}, errors.New("model returned empty content")
 	}
-	return Result{Content: content, Operation: request.Operation, PromptVersion: promptVersion, Provider: s.ProviderName, Model: model, RequestID: response.RequestID, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens, LatencyMs: time.Since(start).Milliseconds(), EvidenceIDs: evidenceIDs}, nil
+	s.record(ctx, request, model, promptVersion, response, latency, "SUCCESS", "")
+	return Result{Content: content, Operation: request.Operation, PromptVersion: promptVersion, Provider: s.ProviderName, Model: model, RequestID: response.RequestID, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens, LatencyMs: latency, EvidenceIDs: evidenceIDs}, nil
 }
 
-func systemPrompt(operation Operation, projectType string) string {
-	base := "你是 AI Content Studio 的专业内容 Agent。项目类型为 " + projectType + "。必须遵守用户要求和提供的知识证据；资料不足时明确标记不确定内容。输出 Markdown，不输出思维过程。"
-	switch operation {
-	case OperationPlan:
-		return base + " 你的角色是 Planner。输出目标、受众、主题、风格、核心结构、知识需求、风险和完成标准。"
-	case OperationOutline:
-		return base + " 你的角色是 Outliner。输出层级清晰、可直接执行的内容目录；每节包含目标、要点、所需证据和预计篇幅。"
-	case OperationWrite:
-		return base + " 你的角色是 Writer。根据创作要求和资料写出完整正文，保持术语、事实和上下文一致。不要虚构资料中不存在的关键事实。"
-	case OperationPolish:
-		return base + " 你的角色是 Polisher。保留原意和事实，只改进准确性、清晰度、结构、语言和节奏。"
-	default:
-		return base
+func (s Service) record(ctx context.Context, request Request, model, promptVersion string, response llm.GenerateResponse, latency int64, status, errorText string) {
+	if s.Recorder == nil {
+		return
 	}
+	_ = s.Recorder.Record(ctx, airun.Run{ID: airun.NewID(), ProjectID: request.ProjectID, TaskID: request.TaskID, Role: string(request.Operation), Provider: s.ProviderName, Model: model, PromptVersion: promptVersion, RequestID: response.RequestID, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens, LatencyMs: latency, Status: status, Error: errorText, CreatedAt: time.Now().UTC()})
 }
 
 func buildContext(evidence []Evidence) (string, []string) {
@@ -125,7 +132,7 @@ func temperature(operation Operation) float64 {
 	if operation == OperationWrite {
 		return 0.7
 	}
-	if operation == OperationPolish {
+	if operation == OperationPolish || operation == OperationRepair || operation == OperationExtract {
 		return 0.3
 	}
 	return 0.4

@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"novelstudio/internal/document"
@@ -17,6 +22,7 @@ import (
 	"novelstudio/internal/project"
 	"novelstudio/internal/task"
 	"novelstudio/internal/validation"
+	"novelstudio/internal/workflow"
 )
 
 type API struct {
@@ -51,6 +57,9 @@ func NewWithServices(store project.Store, docs document.Store, knowledgeStore kn
 	mux.HandleFunc("GET /api/v1/projects/{id}", a.getProject)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", a.deleteProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tree", a.getTree)
+	mux.HandleFunc("POST /api/v1/projects/{id}/nodes", a.createNode)
+	mux.HandleFunc("PUT /api/v1/nodes/{id}", a.updateNode)
+	mux.HandleFunc("DELETE /api/v1/nodes/{id}", a.deleteNode)
 	mux.HandleFunc("GET /api/v1/projects/{id}/documents", a.listDocuments)
 	mux.HandleFunc("POST /api/v1/projects/{id}/documents", a.createDocument)
 	mux.HandleFunc("GET /api/v1/documents/{id}", a.getDocument)
@@ -59,17 +68,337 @@ func NewWithServices(store project.Store, docs document.Store, knowledgeStore kn
 	mux.HandleFunc("POST /api/v1/documents/{id}/versions/{versionId}/restore", a.restoreVersion)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/sources", a.listKnowledgeSources)
 	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/sources", a.createKnowledgeSource)
+	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/files", a.uploadKnowledgeFile)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/search", a.searchKnowledge)
+	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/facts", a.listFacts)
+	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
+	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validation-tasks", a.createValidationTask)
 	mux.HandleFunc("POST /api/v1/projects/{id}/generation-tasks", a.createGenerationTask)
+	mux.HandleFunc("POST /api/v1/projects/{id}/quality-generation-tasks", a.createQualityGenerationTask)
+	mux.HandleFunc("POST /api/v1/projects/{id}/batch-generation-tasks", a.createBatchGenerationTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
 	return recoverer(logger, requestLogger(logger, cors(mux)))
+}
+
+var htmlTags = regexp.MustCompile(`<[^>]+>`)
+
+func (a *API) uploadKnowledgeFile(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILE", "file exceeds 10 MB or multipart form is invalid")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILE", "file field is required")
+		return
+	}
+	defer file.Close()
+	extension := strings.ToLower(filepath.Ext(header.Filename))
+	allowed := map[string]bool{".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true, ".html": true, ".htm": true}
+	if !allowed[extension] {
+		writeError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "supported types: txt, md, json, csv, html")
+		return
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, 10<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILE", err.Error())
+		return
+	}
+	content := string(raw)
+	if extension == ".html" || extension == ".htm" {
+		content = html.UnescapeString(htmlTags.ReplaceAllString(content, " "))
+	}
+	authority := knowledge.Authority(strings.ToUpper(r.FormValue("authority")))
+	if authority == "" {
+		authority = knowledge.AuthorityReference
+	}
+	source, chunks, err := a.knowledge.CreateSource(r.Context(), knowledge.CreateSourceInput{ProjectID: projectID, Name: header.Filename, SourceType: strings.TrimPrefix(strings.ToUpper(extension), "."), Version: r.FormValue("version"), Authority: authority, Content: content})
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "IMPORT_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"source": source, "chunkCount": len(chunks)})
+}
+
+func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil || !a.generator.Configured(generation.OperationWrite) {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "writer model is not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		NodeIDs        []string `json:"nodeIds"`
+		Instruction    string   `json:"instruction"`
+		KnowledgeQuery string   `json:"knowledgeQuery"`
+		WindowSize     int      `json:"windowSize"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if len(input.NodeIDs) == 0 || strings.TrimSpace(input.Instruction) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "nodeIds and instruction are required")
+		return
+	}
+	if input.WindowSize < 1 {
+		input.WindowSize = 2
+	}
+	if input.WindowSize > 3 {
+		input.WindowSize = 3
+	}
+	tree, err := a.store.Tree(r.Context(), projectItem.ID)
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	byID := map[string]project.ContentNode{}
+	for _, node := range tree {
+		byID[node.ID] = node
+	}
+	nodes := make([]project.ContentNode, 0, len(input.NodeIDs))
+	for _, id := range input.NodeIDs {
+		node, ok := byID[id]
+		if !ok {
+			writeError(w, http.StatusUnprocessableEntity, "INVALID_NODE", "content node not found: "+id)
+			return
+		}
+		nodes = append(nodes, node)
+	}
+	evidence := []generation.Evidence{}
+	if strings.TrimSpace(input.KnowledgeQuery) != "" {
+		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
+		if searchErr != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_QUERY", searchErr.Error())
+			return
+		}
+		for _, hit := range hits {
+			evidence = append(evidence, generation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
+		}
+	}
+	item := a.tasks.Create(projectItem.ID, "BATCH_GENERATE", func(ctx context.Context, progress func(int, string)) (any, error) {
+		outputs := make([]generation.Result, len(nodes))
+		semaphore := make(chan struct{}, input.WindowSize)
+		errorsChannel := make(chan error, len(nodes))
+		var wait sync.WaitGroup
+		for index, node := range nodes {
+			wait.Add(1)
+			go func(index int, node project.ContentNode) {
+				defer wait.Done()
+				select {
+				case semaphore <- struct{}{}:
+				case <-ctx.Done():
+					errorsChannel <- ctx.Err()
+					return
+				}
+				defer func() { <-semaphore }()
+				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction + "\n当前内容节点：" + node.Title, Evidence: evidence})
+				if generateErr != nil {
+					errorsChannel <- generateErr
+					return
+				}
+				outputs[index] = result
+				progress(10+(index+1)*60/len(nodes), "已生成 "+node.Title)
+			}(index, node)
+		}
+		wait.Wait()
+		close(errorsChannel)
+		for batchErr := range errorsChannel {
+			if batchErr != nil {
+				return nil, batchErr
+			}
+		}
+		documents := make([]document.Document, 0, len(nodes))
+		for index, node := range nodes {
+			doc, _, saveErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: node.Title, Content: outputs[index].Content})
+			if saveErr != nil {
+				return nil, saveErr
+			}
+			documents = append(documents, doc)
+			progress(75+(index+1)*20/len(nodes), "已保存 "+node.Title)
+		}
+		return map[string]any{"documents": documents, "generations": outputs}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
+}
+func (a *API) createNode(w http.ResponseWriter, r *http.Request) {
+	var input project.CreateNodeInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.store.CreateNode(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+func (a *API) updateNode(w http.ResponseWriter, r *http.Request) {
+	var input project.UpdateNodeInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.store.UpdateNode(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+func (a *API) deleteNode(w http.ResponseWriter, r *http.Request) {
+	if err := a.store.DeleteNode(r.Context(), r.PathValue("id")); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listFacts(w http.ResponseWriter, r *http.Request) {
+	items, err := a.knowledge.ListFacts(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+func (a *API) updateFactStatus(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Status string `json:"status"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.knowledge.UpdateFactStatus(r.Context(), r.PathValue("id"), strings.ToUpper(input.Status))
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+func (a *API) createFactExtractionTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil || !a.generator.Configured(generation.OperationExtract) {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "extractor model is not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Content    string `json:"content"`
+		DocumentID string `json:"documentId"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Content == "" && input.DocumentID != "" {
+		versions, versionErr := a.docs.Versions(r.Context(), input.DocumentID)
+		if versionErr != nil || len(versions) == 0 {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "document content not found")
+			return
+		}
+		input.Content = versions[0].Content
+	}
+	if strings.TrimSpace(input.Content) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "content or documentId is required")
+		return
+	}
+	item := a.tasks.Create(projectItem.ID, "FACT_EXTRACT", func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(20, "Extractor 正在抽取结构化事实")
+		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationExtract, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: "抽取正文中的明确事实", Content: input.Content})
+		if generateErr != nil {
+			return nil, generateErr
+		}
+		var decoded struct {
+			Facts []knowledge.CreateFactInput `json:"facts"`
+		}
+		raw := strings.TrimSpace(generated.Content)
+		raw = strings.TrimPrefix(raw, "```json")
+		raw = strings.TrimSuffix(raw, "```")
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil {
+			return nil, fmt.Errorf("decode extracted facts: %w", err)
+		}
+		facts, saveErr := a.knowledge.CreateFacts(ctx, projectItem.ID, decoded.Facts)
+		if saveErr != nil {
+			return nil, saveErr
+		}
+		progress(90, "事实已保存为待审核状态")
+		return map[string]any{"facts": facts, "generation": generated}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
+}
+
+func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil || a.pipeline == nil || !a.generator.Configured(generation.OperationRepair) {
+		writeError(w, http.StatusServiceUnavailable, "WORKFLOW_NOT_CONFIGURED", "writer, repair and validation models are required")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Instruction    string `json:"instruction"`
+		Title          string `json:"title"`
+		KnowledgeQuery string `json:"knowledgeQuery"`
+		MaxRepairs     int    `json:"maxRepairs"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Instruction) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "instruction is required")
+		return
+	}
+	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
+	reviewRequest := validation.ReviewRequest{Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
+	if strings.TrimSpace(input.KnowledgeQuery) != "" {
+		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
+		if searchErr != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_QUERY", searchErr.Error())
+			return
+		}
+		for _, hit := range hits {
+			genRequest.Evidence = append(genRequest.Evidence, generation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
+			reviewRequest.Evidence = append(reviewRequest.Evidence, validation.Evidence{ID: hit.Chunk.ID, Source: hit.Source.Name, Authority: string(hit.Source.Authority), Content: hit.Chunk.Content})
+		}
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = "AI 质量生成正文"
+	}
+	flow := workflow.QualityWorkflow{Generator: a.generator, Validator: a.pipeline, MaxRepairs: input.MaxRepairs}
+	item := a.tasks.Create(projectItem.ID, "QUALITY_GENERATE", func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(10, "开始生成初稿")
+		result, runErr := flow.Run(ctx, genRequest, reviewRequest, progress)
+		if runErr != nil {
+			return nil, runErr
+		}
+		progress(90, "保存质量门禁结果")
+		doc, version, saveErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: title, Content: result.Content})
+		if saveErr != nil {
+			return nil, saveErr
+		}
+		return map[string]any{"workflow": result, "document": doc, "version": version}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
 }
 
 func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {

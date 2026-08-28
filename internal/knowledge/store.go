@@ -19,6 +19,9 @@ type Store interface {
 	ListSources(context.Context, string) ([]Source, error)
 	CreateSource(context.Context, CreateSourceInput) (Source, []Chunk, error)
 	Search(context.Context, string, string, int) ([]SearchHit, error)
+	CreateFacts(context.Context, string, []CreateFactInput) ([]Fact, error)
+	ListFacts(context.Context, string) ([]Fact, error)
+	UpdateFactStatus(context.Context, string, string) (Fact, error)
 }
 
 type MemoryStore struct {
@@ -27,10 +30,53 @@ type MemoryStore struct {
 	sources   map[string]Source
 	projectID map[string]string
 	chunks    map[string][]Chunk
+	facts     map[string]Fact
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{sources: make(map[string]Source), projectID: make(map[string]string), chunks: make(map[string][]Chunk)}
+	return &MemoryStore{sources: make(map[string]Source), projectID: make(map[string]string), chunks: make(map[string][]Chunk), facts: make(map[string]Fact)}
+}
+
+func (s *MemoryStore) CreateFacts(_ context.Context, projectID string, inputs []CreateFactInput) ([]Fact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	items := make([]Fact, 0, len(inputs))
+	for _, input := range inputs {
+		if strings.TrimSpace(input.Subject) == "" || strings.TrimSpace(input.Predicate) == "" || strings.TrimSpace(input.Object) == "" {
+			continue
+		}
+		item := Fact{ID: s.nextID("fac"), ProjectID: projectID, Subject: input.Subject, Predicate: input.Predicate, Object: input.Object, SourceChunkID: input.SourceChunkID, Confidence: input.Confidence, Status: "PROPOSED", CreatedAt: now, UpdatedAt: now}
+		s.facts[item.ID] = item
+		items = append(items, item)
+	}
+	return items, nil
+}
+func (s *MemoryStore) ListFacts(_ context.Context, projectID string) ([]Fact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := []Fact{}
+	for _, item := range s.facts {
+		if item.ProjectID == projectID {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+func (s *MemoryStore) UpdateFactStatus(_ context.Context, id, status string) (Fact, error) {
+	if status != "CONFIRMED" && status != "REJECTED" && status != "SUPERSEDED" {
+		return Fact{}, errors.New("invalid fact status")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.facts[id]
+	if !ok {
+		return Fact{}, ErrNotFound
+	}
+	item.Status = status
+	item.UpdatedAt = time.Now().UTC()
+	s.facts[id] = item
+	return item, nil
 }
 
 func (s *MemoryStore) ListSources(_ context.Context, projectID string) ([]Source, error) {

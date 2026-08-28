@@ -49,11 +49,22 @@ type SearchHit struct {
 }
 
 type Fact struct {
-	ID            string  `json:"id"`
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"projectId"`
+	Subject       string    `json:"subject"`
+	Predicate     string    `json:"predicate"`
+	Object        string    `json:"object"`
+	SourceChunkID string    `json:"sourceChunkId"`
+	Confidence    float64   `json:"confidence"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type CreateFactInput struct {
 	Subject       string  `json:"subject"`
 	Predicate     string  `json:"predicate"`
 	Object        string  `json:"object"`
 	SourceChunkID string  `json:"sourceChunkId"`
 	Confidence    float64 `json:"confidence"`
-	Status        string  `json:"status"`
 }

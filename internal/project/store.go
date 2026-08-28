@@ -19,6 +19,83 @@ type Store interface {
 	Create(context.Context, CreateInput) (Project, error)
 	Delete(context.Context, string) error
 	Tree(context.Context, string) ([]ContentNode, error)
+	CreateNode(context.Context, string, CreateNodeInput) (ContentNode, error)
+	UpdateNode(context.Context, string, UpdateNodeInput) (ContentNode, error)
+	DeleteNode(context.Context, string) error
+}
+
+func (s *MemoryStore) CreateNode(_ context.Context, projectID string, input CreateNodeInput) (ContentNode, error) {
+	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.NodeType) == "" {
+		return ContentNode{}, errors.New("title and nodeType are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.projects[projectID]; !ok {
+		return ContentNode{}, ErrNotFound
+	}
+	if input.Position < 1 {
+		input.Position = len(s.nodes[projectID]) + 1
+	}
+	item := ContentNode{ID: s.nextID("nod"), ProjectID: projectID, ParentID: input.ParentID, NodeType: strings.ToUpper(input.NodeType), Title: strings.TrimSpace(input.Title), Position: input.Position, Metadata: input.Metadata}
+	s.nodes[projectID] = append(s.nodes[projectID], item)
+	return item, nil
+}
+func (s *MemoryStore) UpdateNode(_ context.Context, id string, input UpdateNodeInput) (ContentNode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for projectID, nodes := range s.nodes {
+		for index, item := range nodes {
+			if item.ID == id {
+				if strings.TrimSpace(input.Title) != "" {
+					item.Title = strings.TrimSpace(input.Title)
+				}
+				if input.Position > 0 {
+					item.Position = input.Position
+				}
+				if input.Metadata != nil {
+					item.Metadata = input.Metadata
+				}
+				s.nodes[projectID][index] = item
+				return item, nil
+			}
+		}
+	}
+	return ContentNode{}, ErrNotFound
+}
+func (s *MemoryStore) DeleteNode(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	remove := map[string]bool{id: true}
+	for {
+		changed := false
+		for _, nodes := range s.nodes {
+			for _, node := range nodes {
+				if node.ParentID != nil && remove[*node.ParentID] && !remove[node.ID] {
+					remove[node.ID] = true
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	for projectID, nodes := range s.nodes {
+		kept := nodes[:0]
+		for _, node := range nodes {
+			if remove[node.ID] {
+				found = true
+			} else {
+				kept = append(kept, node)
+			}
+		}
+		s.nodes[projectID] = kept
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return nil
 }
 
 type MemoryStore struct {

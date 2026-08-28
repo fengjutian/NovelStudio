@@ -52,6 +52,8 @@ export interface SearchHit {
   score: number
   matchType: string
 }
+export interface ContentNode { id:string; projectId:string; parentId?:string; nodeType:string; title:string; position:number; metadata?:Record<string,unknown> }
+export interface Fact { id:string; projectId:string; subject:string; predicate:string; object:string; confidence:number; status:string; createdAt:string }
 
 export interface ValidationIssue {
   id: string
