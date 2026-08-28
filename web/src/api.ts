@@ -33,5 +33,6 @@ export const api = {
   createValidationTask: (projectId: string, input: { text: string; task: string; knowledgeQuery: string; dimensions: string[] }) =>
     request<AITask>(`/api/v1/projects/${projectId}/validation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
   task: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}`),
+  tasks: () => request<{ items: AITask[]; total: number }>('/api/v1/tasks'),
   cancelTask: (taskId: string) => request<AITask>(`/api/v1/tasks/${taskId}/cancel`, { method: 'POST' }),
 }

@@ -17,6 +17,8 @@ export function App() {
   const [description, setDescription] = useState('')
   const [type, setType] = useState<ProjectType>('NOVEL')
   const [selected, setSelected] = useState<Project | null>(null)
+  const [selectedTab, setSelectedTab] = useState<'documents' | 'knowledge' | 'quality'>('documents')
+  const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'tasks' | 'models'>('projects')
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
   const create = useMutation({
     mutationFn: api.createProject,
@@ -36,12 +38,12 @@ export function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <a className="brand" href="#"><span>字</span><strong>Content Studio</strong></a>
+        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><span>字</span><strong>Content Studio</strong></a>
         <nav>
-          <a className="active" href="#"><span>⌂</span>项目</a>
-          <a href="#knowledge"><span>◇</span>知识库</a>
-          <a href="#tasks"><span>◷</span>任务中心</a>
-          <a href="#models"><span>◎</span>模型与校验</a>
+          <a className={activeNav === 'projects' ? 'active' : ''} href="#projects" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><span>⌂</span>项目</a>
+          <a className={activeNav === 'knowledge' ? 'active' : ''} href="#knowledge" onClick={(event) => { event.preventDefault(); setActiveNav('knowledge') }}><span>◇</span>知识库</a>
+          <a className={activeNav === 'tasks' ? 'active' : ''} href="#tasks" onClick={(event) => { event.preventDefault(); setActiveNav('tasks') }}><span>◷</span>任务中心</a>
+          <a className={activeNav === 'models' ? 'active' : ''} href="#models" onClick={(event) => { event.preventDefault(); setActiveNav('models') }}><span>◎</span>模型与校验</a>
         </nav>
         <div className="sidebar-foot">
           <div className="avatar">CF</div>
@@ -51,6 +53,7 @@ export function App() {
       </aside>
 
       <main>
+        {activeNav === 'projects' ? <>
         <header>
           <div><p className="eyebrow">WORKSPACE</p><h1>创作项目</h1><p>用知识与多模型协作，构建可信的长篇内容。</p></div>
           <button className="primary" onClick={() => setOpen(true)}>＋ 新建项目</button>
@@ -69,7 +72,7 @@ export function App() {
         <section className="grid">
           {projects.data?.items.map((project) => {
             const info = typeInfo[project.type]
-            return <article className="project-card" key={project.id} onClick={() => setSelected(project)}>
+            return <article className="project-card" key={project.id} onClick={() => { setSelectedTab('documents'); setSelected(project) }}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
               <div className="project-top"><span>{info.label}</span><button aria-label="项目菜单">•••</button></div>
               <h3>{project.name}</h3>
@@ -80,6 +83,7 @@ export function App() {
           })}
           <button className="new-card" onClick={() => setOpen(true)}><span>＋</span><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
         </section>
+        </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} onOpen={(project, tab) => { setSelectedTab(tab); setSelected(project) }} />}
       </main>
 
       {open && <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
@@ -94,14 +98,36 @@ export function App() {
           <div className="dialog-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>取消</button><button className="primary" disabled={create.isPending}>{create.isPending ? '创建中…' : '创建项目'}</button></div>
         </form>
       </div>}
-      {selected && <Workspace project={selected} onClose={() => setSelected(null)} />}
+      {selected && <Workspace project={selected} initialTab={selectedTab} onClose={() => setSelected(null)} />}
     </div>
   )
 }
 
-function Workspace({ project, onClose }: { project: Project; onClose: () => void }) {
+function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 'models'; projects: Project[]; onOpen: (project: Project, tab: 'documents' | 'knowledge' | 'quality') => void }) {
+  const tasks = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, enabled: page === 'tasks', refetchInterval: page === 'tasks' ? 2000 : false })
+  const models = useQuery({ queryKey: ['model-status'], queryFn: api.modelStatus, enabled: page === 'models' })
+
+  if (page === 'knowledge') return <>
+    <header><div><p className="eyebrow">KNOWLEDGE BASE</p><h1>知识库</h1><p>按项目管理权威资料、事实来源和检索上下文。</p></div></header>
+    <section className="global-panel"><div className="section-head"><div><h2>选择项目</h2><p>知识来源按项目严格隔离</p></div></div><div className="global-list">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project, 'knowledge')}><span className={`project-icon ${typeInfo[project.type].accent}`}>{typeInfo[project.type].icon}</span><div><strong>{project.name}</strong><small>{typeInfo[project.type].label} · 管理知识来源与检索</small></div><b>打开知识库 →</b></button>)}</div></section>
+  </>
+
+  if (page === 'tasks') return <>
+    <header><div><p className="eyebrow">TASK CENTER</p><h1>任务中心</h1><p>查看后台生成、校验和处理任务的实时状态。</p></div></header>
+    <section className="global-panel"><div className="section-head"><div><h2>全部任务</h2><p>{tasks.data?.total ?? 0} 条任务记录</p></div></div><div className="task-table">{tasks.data?.items.map((item) => <article key={item.id}><span className={`task-state ${item.status.toLowerCase()}`}>{item.status}</span><div><strong>{item.type}</strong><small>{item.message}</small></div><div className="mini-progress"><i style={{ width: `${item.progress}%` }} /></div><b>{item.progress}%</b></article>)}{tasks.data?.total === 0 && <p className="empty-line">暂无后台任务。进入项目的“多模型校验”即可创建任务。</p>}</div></section>
+  </>
+
+  return <>
+    <header><div><p className="eyebrow">MODEL ROUTING</p><h1>模型与校验</h1><p>检查服务端模型路由，并进入项目执行严格质量校验。</p></div></header>
+    <section className="metrics model-metrics"><article><span>配置状态</span><strong className="text-value">{models.data?.configured ? '已就绪' : '未配置'}</strong><small>OpenAI-Compatible Provider</small></article><article><span>Validator</span><strong>{models.data?.validatorCount ?? 0}</strong><small>并行独立校验模型</small></article><article><span>Judge</span><strong className="text-value">{models.data?.judgeConfigured ? '已配置' : '未配置'}</strong><small>只处理重大模型分歧</small></article></section>
+    {!models.data?.configured && <div className="setup-callout"><strong>需要配置模型环境变量</strong><code>LLM_BASE_URL · LLM_API_KEY · VALIDATOR_MODELS · JUDGE_MODEL</code><span>设置后重启 Go API。</span></div>}
+    <section className="global-panel"><div className="section-head"><div><h2>项目校验</h2><p>选择项目，使用它自己的知识库作为证据</p></div></div><div className="global-list">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project, 'quality')}><span className={`project-icon ${typeInfo[project.type].accent}`}>{typeInfo[project.type].icon}</span><div><strong>{project.name}</strong><small>{typeInfo[project.type].label}</small></div><b>打开校验 →</b></button>)}</div></section>
+  </>
+}
+
+function Workspace({ project, initialTab, onClose }: { project: Project; initialTab: 'documents' | 'knowledge' | 'quality'; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'documents' | 'knowledge' | 'quality'>('documents')
+  const [tab, setTab] = useState<'documents' | 'knowledge' | 'quality'>(initialTab)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)

@@ -57,6 +57,7 @@ func NewWithStores(store project.Store, docs document.Store, knowledgeStore know
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
+	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validation-tasks", a.createValidationTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
@@ -146,6 +147,11 @@ func (a *API) decodeReviewRequest(w http.ResponseWriter, r *http.Request, projec
 
 func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
 	items := a.tasks.List(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) listAllTasks(w http.ResponseWriter, _ *http.Request) {
+	items := a.tasks.List("")
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
