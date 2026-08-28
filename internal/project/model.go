@@ -34,6 +34,7 @@ type ContentNode struct {
 	ID        string         `json:"id"`
 	ProjectID string         `json:"projectId"`
 	ParentID  *string        `json:"parentId,omitempty"`
+	DocumentID *string      `json:"documentId,omitempty"`
 	NodeType  string         `json:"nodeType"`
 	Title     string         `json:"title"`
 	Position  int            `json:"position"`
@@ -50,4 +51,5 @@ type UpdateNodeInput struct {
 	Title    string         `json:"title"`
 	Position int            `json:"position"`
 	Metadata map[string]any `json:"metadata"`
+	DocumentID *string `json:"documentId"`
 }

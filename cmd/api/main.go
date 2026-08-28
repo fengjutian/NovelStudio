@@ -18,17 +18,18 @@ import (
 	mysqlstore "novelstudio/internal/persistence/mysql"
 	"novelstudio/internal/project"
 	"novelstudio/internal/promptcatalog"
+	"novelstudio/internal/qualityhistory"
 	"novelstudio/internal/task"
 	"novelstudio/internal/validation"
 )
 
 func main() {
 	addr := env("HTTP_ADDR", ":8080")
-	projectStore, documentStore, knowledgeStore, runRecorder, taskManager, closeStore := stores()
+	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, taskManager, closeStore := stores()
 	defer closeStore()
 	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)
-	handler := httpapi.NewWithRuntime(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, slog.Default())
+	handler := httpapi.NewWithRuntime(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
@@ -87,11 +88,11 @@ func first(values ...string) string {
 	return ""
 }
 
-func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, *task.Manager, func()) {
+func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, *task.Manager, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
 		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
-		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), task.NewManager(), func() {}
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), qualityhistory.NewMemoryStore(), task.NewManager(), func() {}
 	}
 	db, err := mysqlstore.Open(context.Background(), dsn)
 	if err != nil {
@@ -104,7 +105,7 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, *
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB:db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
 func validationPipeline(recorder airun.Recorder) *validation.Pipeline {

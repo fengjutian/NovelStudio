@@ -31,7 +31,8 @@ func (s ProjectStore) UpdateNode(ctx context.Context, id string, input project.U
 	var current project.ContentNode
 	var parent sql.NullString
 	var metadata []byte
-	err := s.DB.QueryRowContext(ctx, `SELECT id,project_id,parent_id,node_type,title,position,metadata FROM content_nodes WHERE id=?`, id).Scan(&current.ID, &current.ProjectID, &parent, &current.NodeType, &current.Title, &current.Position, &metadata)
+	var documentID sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT id,project_id,parent_id,document_id,node_type,title,position,metadata FROM content_nodes WHERE id=?`, id).Scan(&current.ID, &current.ProjectID, &parent, &documentID, &current.NodeType, &current.Title, &current.Position, &metadata)
 	if errors.Is(err, sql.ErrNoRows) {
 		return project.ContentNode{}, project.ErrNotFound
 	}
@@ -41,6 +42,7 @@ func (s ProjectStore) UpdateNode(ctx context.Context, id string, input project.U
 	if parent.Valid {
 		current.ParentID = &parent.String
 	}
+	if documentID.Valid { current.DocumentID=&documentID.String }
 	if strings.TrimSpace(input.Title) != "" {
 		current.Title = strings.TrimSpace(input.Title)
 	}
@@ -52,7 +54,8 @@ func (s ProjectStore) UpdateNode(ctx context.Context, id string, input project.U
 	} else if len(metadata) > 0 {
 		_ = json.Unmarshal(metadata, &current.Metadata)
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE content_nodes SET title=?,position=?,metadata=?,updated_at=? WHERE id=?`, current.Title, current.Position, metadataJSON(current.Metadata), time.Now().UTC(), id)
+	if input.DocumentID!=nil{current.DocumentID=input.DocumentID}
+	_, err = s.DB.ExecContext(ctx, `UPDATE content_nodes SET title=?,position=?,metadata=?,document_id=?,updated_at=? WHERE id=?`, current.Title, current.Position, metadataJSON(current.Metadata), current.DocumentID,time.Now().UTC(), id)
 	return current, err
 }
 func (s ProjectStore) DeleteNode(ctx context.Context, id string) error {
@@ -146,7 +149,7 @@ func (s ProjectStore) Tree(ctx context.Context, id string) ([]project.ContentNod
 	if _, err := s.Get(ctx, id); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, project_id, parent_id, node_type, title, position, metadata FROM content_nodes WHERE project_id = ? ORDER BY parent_id, position`, id)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, project_id, parent_id, document_id, node_type, title, position, metadata FROM content_nodes WHERE project_id = ? ORDER BY parent_id, position`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -155,13 +158,15 @@ func (s ProjectStore) Tree(ctx context.Context, id string) ([]project.ContentNod
 	for rows.Next() {
 		var item project.ContentNode
 		var parent sql.NullString
+		var documentID sql.NullString
 		var metadata []byte
-		if err := rows.Scan(&item.ID, &item.ProjectID, &parent, &item.NodeType, &item.Title, &item.Position, &metadata); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProjectID, &parent,&documentID, &item.NodeType, &item.Title, &item.Position, &metadata); err != nil {
 			return nil, err
 		}
 		if parent.Valid {
 			item.ParentID = &parent.String
 		}
+		if documentID.Valid { item.DocumentID=&documentID.String }
 		if len(metadata) > 0 {
 			_ = json.Unmarshal(metadata, &item.Metadata)
 		}
