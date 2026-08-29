@@ -1,7 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap');
 @custom-variant dark (&:is(.dark *));
 @theme inline{--color-background:var(--background);--color-foreground:var(--foreground);--color-card:var(--card);--color-card-foreground:var(--card-foreground);--color-primary:var(--primary);--color-primary-foreground:var(--primary-foreground);--color-border:var(--border);--color-input:var(--input);--color-ring:var(--ring)}
 :root{--background:#f3f0ea;--foreground:#312c27;--card:#faf8f4;--card-foreground:#312c27;--primary:#b7772c;--primary-foreground:#fff;--border:#ded8ce;--input:#d8d1c7;--ring:#b7772c;--radius:.5rem}

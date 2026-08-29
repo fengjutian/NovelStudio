@@ -4,6 +4,7 @@ import { api } from './api'
 import {CircleGauge,Clock3,Database,Download,Home,Plus} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
+import {Button} from './components/ui/button'
 import type { ProjectType } from './types'
 import type { Document, GenerationResult, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
 
@@ -63,7 +64,7 @@ export function App() {
         {activeNav === 'projects' ? <>
         <header>
           <div><p className="eyebrow">WORKSPACE</p><h1>创作项目</h1><p>用知识与多模型协作，构建可信的长篇内容。</p></div>
-          <button className="primary" onClick={() => setOpen(true)}><Plus size={16}/> 新建项目</button>
+          <Button className="primary" onClick={() => setOpen(true)}><Plus size={16}/> 新建项目</Button>
         </header>
 
         <section className="metrics">
