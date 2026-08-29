@@ -60,6 +60,7 @@ export interface Fact { id:string; projectId:string; subject:string; predicate:s
 export interface MemoryEntry { id:string;projectId:string;type:'CHARACTER'|'PLACE'|'TIMELINE'|'PLOT'|'FORESHADOW';name:string;summary:string;status:string;attributes?:Record<string,unknown>;createdAt:string;updatedAt:string }
 export interface LocalModelProvider {baseUrl:string;model:string;enabled:boolean;hasApiKey:boolean}
 export interface LocalModelConfig {activeProvider:'deepseek'|'minimax';deepseek:LocalModelProvider;minimax:LocalModelProvider;path:string}
+export interface KnowledgeFile {id:string;projectId:string;name:string;extension:string;mimeType:string;size:number;status:'INDEXED'|'STORED'|'FAILED';sourceId?:string;createdAt:string}
 
 export interface AIRun { id:string; projectId:string; taskId?:string; role:string; provider:string; model:string; promptVersion:string; requestId?:string; inputTokens:number; outputTokens:number; latencyMs:number; status:string; error?:string; createdAt:string }
 export interface AIRunList { items:AIRun[]; total:number; stats:{inputTokens:number;outputTokens:number;latencyMs:number} }

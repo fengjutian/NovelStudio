@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -91,6 +92,9 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/sources", a.listKnowledgeSources)
 	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/sources", a.createKnowledgeSource)
 	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/files", a.uploadKnowledgeFile)
+	mux.HandleFunc("GET /api/v1/knowledge/files", a.listKnowledgeFiles)
+	mux.HandleFunc("GET /api/v1/knowledge/files/{id}/download", a.downloadKnowledgeFile)
+	mux.HandleFunc("DELETE /api/v1/knowledge/files/{id}", a.deleteKnowledgeFile)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/search", a.searchKnowledge)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/facts", a.listFacts)
 	mux.HandleFunc("GET /api/v1/projects/{id}/memories", a.listMemories)
@@ -125,9 +129,9 @@ func (a *API) uploadKnowledgeFile(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, err)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_FILE", "file exceeds 10 MB or multipart form is invalid")
+	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_FILE", "file exceeds 50 MB or multipart form is invalid")
 		return
 	}
 	file, header, err := r.FormFile("file")
@@ -137,31 +141,29 @@ func (a *API) uploadKnowledgeFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	extension := strings.ToLower(filepath.Ext(header.Filename))
-	allowed := map[string]bool{".txt": true, ".md": true, ".markdown": true, ".json": true, ".csv": true, ".html": true, ".htm": true}
+	allowed := map[string]bool{".txt":true,".md":true,".markdown":true,".json":true,".csv":true,".html":true,".htm":true,".pdf":true,".doc":true,".docx":true,".ppt":true,".pptx":true,".png":true,".jpg":true,".jpeg":true,".gif":true,".webp":true,".svg":true}
 	if !allowed[extension] {
-		writeError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "supported types: txt, md, json, csv, html")
+		writeError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "supported types: PDF, Word, PowerPoint, images, Markdown and text")
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, 10<<20))
+	raw, err := io.ReadAll(io.LimitReader(file, 50<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_FILE", err.Error())
 		return
 	}
-	content := string(raw)
-	if extension == ".html" || extension == ".htm" {
-		content = html.UnescapeString(htmlTags.ReplaceAllString(content, " "))
-	}
+	root:=knowledgeUploadRoot();digest:=fmt.Sprintf("%x",sha256.Sum256(raw));relativePath:=filepath.Join(projectID,fmt.Sprintf("%d-%s%s",time.Now().UnixNano(),digest[:12],extension));absolutePath:=filepath.Join(root,relativePath);if err:=os.MkdirAll(filepath.Dir(absolutePath),0700);err!=nil{writeError(w,http.StatusInternalServerError,"STORAGE_FAILED",err.Error());return};if err:=os.WriteFile(absolutePath,raw,0600);err!=nil{writeError(w,http.StatusInternalServerError,"STORAGE_FAILED",err.Error());return}
 	authority := knowledge.Authority(strings.ToUpper(r.FormValue("authority")))
 	if authority == "" {
 		authority = knowledge.AuthorityReference
 	}
-	source, chunks, err := a.knowledge.CreateSource(r.Context(), knowledge.CreateSourceInput{ProjectID: projectID, Name: header.Filename, SourceType: strings.TrimPrefix(strings.ToUpper(extension), "."), Version: r.FormValue("version"), Authority: authority, Content: content})
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "IMPORT_FAILED", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"source": source, "chunkCount": len(chunks)})
+	status,sourceID,chunkCount:="STORED","",0;textual:=map[string]bool{".txt":true,".md":true,".markdown":true,".json":true,".csv":true,".html":true,".htm":true};if textual[extension]{content:=string(raw);if extension==".html"||extension==".htm"{content=html.UnescapeString(htmlTags.ReplaceAllString(content," "))};source,chunks,sourceErr:=a.knowledge.CreateSource(r.Context(),knowledge.CreateSourceInput{ProjectID:projectID,Name:filepath.Base(header.Filename),SourceType:strings.TrimPrefix(strings.ToUpper(extension),"."),Version:r.FormValue("version"),Authority:authority,Content:content});if sourceErr!=nil{_ = os.Remove(absolutePath);writeError(w,http.StatusUnprocessableEntity,"IMPORT_FAILED",sourceErr.Error());return};sourceID,chunkCount,status=source.ID,len(chunks),"INDEXED"}
+	asset,err:=a.knowledge.CreateFileAsset(r.Context(),knowledge.CreateFileAssetInput{ProjectID:projectID,Name:filepath.Base(header.Filename),Extension:extension,MIMEType:header.Header.Get("Content-Type"),Size:int64(len(raw)),Status:status,StoragePath:relativePath,SourceID:sourceID});if err!=nil{_ = os.Remove(absolutePath);writeError(w,http.StatusInternalServerError,"STORAGE_FAILED",err.Error());return};writeJSON(w,http.StatusCreated,map[string]any{"file":asset,"chunkCount":chunkCount})
 }
+
+func knowledgeUploadRoot()string{value:=strings.TrimSpace(os.Getenv("KNOWLEDGE_UPLOAD_DIR"));if value==""{value=filepath.Join(".local","uploads")};absolute,_:=filepath.Abs(value);return absolute}
+func(a *API)listKnowledgeFiles(w http.ResponseWriter,r *http.Request){items,err:=a.knowledge.ListFileAssets(r.Context(),r.URL.Query().Get("projectId"));if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items)})}
+func(a *API)downloadKnowledgeFile(w http.ResponseWriter,r *http.Request){item,err:=a.knowledge.GetFileAsset(r.Context(),r.PathValue("id"));if err!=nil{writeError(w,http.StatusNotFound,"NOT_FOUND",err.Error());return};path:=filepath.Join(knowledgeUploadRoot(),item.StoragePath);w.Header().Set("Content-Disposition",fmt.Sprintf(`attachment; filename*=UTF-8''%s`,url.QueryEscape(item.Name)));w.Header().Set("Content-Type",item.MIMEType);http.ServeFile(w,r,path)}
+func(a *API)deleteKnowledgeFile(w http.ResponseWriter,r *http.Request){item,err:=a.knowledge.DeleteFileAsset(r.Context(),r.PathValue("id"));if err!=nil{writeError(w,http.StatusNotFound,"NOT_FOUND",err.Error());return};_ = os.Remove(filepath.Join(knowledgeUploadRoot(),item.StoragePath));w.WriteHeader(http.StatusNoContent)}
 
 func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) {
 	if a.generator == nil || !a.generator.Configured(generation.OperationWrite) {
