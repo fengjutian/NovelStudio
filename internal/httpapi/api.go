@@ -415,11 +415,15 @@ func (a *API) deleteMemory(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) memoryEvidence(ctx context.Context, projectID string) []generation.Evidence {
 	items, err := a.knowledge.ListMemories(ctx, projectID, "")
-	if err != nil { return nil }
-	if len(items) > 30 { items = items[:30] }
+	if err != nil {
+		return nil
+	}
+	if len(items) > 30 {
+		items = items[:30]
+	}
 	evidence := make([]generation.Evidence, 0, len(items))
 	for _, item := range items {
-		evidence = append(evidence, generation.Evidence{ID:item.ID, Source:"Story Memory / "+item.Type+" / "+item.Name, Authority:"INTERNAL", Content:item.Summary})
+		evidence = append(evidence, generation.Evidence{ID: item.ID, Source: "Story Memory / " + item.Type + " / " + item.Name, Authority: "INTERNAL", Content: item.Summary})
 	}
 	return evidence
 }
