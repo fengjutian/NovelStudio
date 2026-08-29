@@ -56,7 +56,28 @@ func main() {
 	}
 }
 
-func applyLocalModelConfig(){path:=strings.TrimSpace(os.Getenv("MODEL_CONFIG_PATH"));if path==""{path=".local/model-config.json"};name,provider,err:= (modelconfig.Store{Path:path}).Active();if err!=nil{slog.Warn("cannot read local model config","error",err);return};if !provider.Enabled{return};_ = os.Setenv("LLM_BASE_URL",provider.BaseURL);_ = os.Setenv("LLM_API_KEY",provider.APIKey);_ = os.Setenv("VALIDATOR_MODELS",provider.Model);_ = os.Setenv("JUDGE_MODEL",provider.Model);for _,key:=range []string{"PLANNER_MODEL","OUTLINER_MODEL","WRITER_MODEL","POLISHER_MODEL","REPAIR_MODEL","EXTRACTOR_MODEL"}{_ = os.Setenv(key,provider.Model)};slog.Info("local model configuration enabled","provider",name,"model",provider.Model,"path",path)}
+func applyLocalModelConfig() {
+	path := strings.TrimSpace(os.Getenv("MODEL_CONFIG_PATH"))
+	if path == "" {
+		path = ".local/model-config.json"
+	}
+	name, provider, err := (modelconfig.Store{Path: path}).Active()
+	if err != nil {
+		slog.Warn("cannot read local model config", "error", err)
+		return
+	}
+	if !provider.Enabled {
+		return
+	}
+	_ = os.Setenv("LLM_BASE_URL", provider.BaseURL)
+	_ = os.Setenv("LLM_API_KEY", provider.APIKey)
+	_ = os.Setenv("VALIDATOR_MODELS", provider.Model)
+	_ = os.Setenv("JUDGE_MODEL", provider.Model)
+	for _, key := range []string{"PLANNER_MODEL", "OUTLINER_MODEL", "WRITER_MODEL", "POLISHER_MODEL", "REPAIR_MODEL", "EXTRACTOR_MODEL"} {
+		_ = os.Setenv(key, provider.Model)
+	}
+	slog.Info("local model configuration enabled", "provider", name, "model", provider.Model, "path", path)
+}
 
 func generationService(recorder airun.Recorder) *generation.Service {
 	baseURL := strings.TrimSpace(os.Getenv("LLM_BASE_URL"))

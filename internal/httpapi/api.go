@@ -31,15 +31,15 @@ import (
 )
 
 type API struct {
-	store     project.Store
-	docs      document.Store
-	knowledge knowledge.Store
-	pipeline  *validation.Pipeline
-	generator *generation.Service
-	tasks     *task.Manager
-	logger    *slog.Logger
-	runs      airun.Recorder
-	quality   qualityhistory.Store
+	store       project.Store
+	docs        document.Store
+	knowledge   knowledge.Store
+	pipeline    *validation.Pipeline
+	generator   *generation.Service
+	tasks       *task.Manager
+	logger      *slog.Logger
+	runs        airun.Recorder
+	quality     qualityhistory.Store
 	modelConfig modelconfig.Store
 }
 
@@ -62,8 +62,11 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	if tasks == nil {
 		tasks = task.NewManager()
 	}
-	configPath:=strings.TrimSpace(os.Getenv("MODEL_CONFIG_PATH"));if configPath==""{configPath=filepath.Join(".local","model-config.json")}
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, modelConfig:modelconfig.Store{Path:configPath}, logger: logger}
+	configPath := strings.TrimSpace(os.Getenv("MODEL_CONFIG_PATH"))
+	if configPath == "" {
+		configPath = filepath.Join(".local", "model-config.json")
+	}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, modelConfig: modelconfig.Store{Path: configPath}, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -580,8 +583,26 @@ func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured, "generationOperations": generationOperations})
 }
 
-func(a *API)getLocalModelConfig(w http.ResponseWriter,_ *http.Request){config,err:=a.modelConfig.Public();if err!=nil{writeError(w,http.StatusInternalServerError,"CONFIG_READ_FAILED",err.Error());return};writeJSON(w,http.StatusOK,config)}
-func(a *API)updateLocalModelConfig(w http.ResponseWriter,r *http.Request){var input modelconfig.UpdateInput;if !decodeJSON(w,r,&input){return};config,err:=a.modelConfig.Save(input);if err!=nil{writeError(w,http.StatusUnprocessableEntity,"CONFIG_SAVE_FAILED",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"config":config,"restartRequired":true})}
+func (a *API) getLocalModelConfig(w http.ResponseWriter, _ *http.Request) {
+	config, err := a.modelConfig.Public()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CONFIG_READ_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+func (a *API) updateLocalModelConfig(w http.ResponseWriter, r *http.Request) {
+	var input modelconfig.UpdateInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	config, err := a.modelConfig.Save(input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "CONFIG_SAVE_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"config": config, "restartRequired": true})
+}
 
 func (a *API) listAIRuns(w http.ResponseWriter, r *http.Request) {
 	if a.runs == nil {
@@ -919,17 +940,43 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) dashboardStats(w http.ResponseWriter, r *http.Request) {
 	projects, err := a.store.List(r.Context())
-	if err != nil { writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return }
-	documentCount,sourceCount,pendingIssues,qualityTotal,qualityScore:=0,0,0,0,0
-	for _,item:=range projects{
-		if docs,docErr:=a.docs.List(r.Context(),item.ID);docErr==nil{documentCount+=len(docs)}
-		if sources,sourceErr:=a.knowledge.ListSources(r.Context(),item.ID);sourceErr==nil{sourceCount+=len(sources)}
-		if a.quality!=nil{if results,resultErr:=a.quality.List(r.Context(),item.ID,200);resultErr==nil{for _,result:=range results{qualityTotal++;qualityScore+=result.Score;for _,issue:=range result.Result.Result.Issues{if issue.Severity=="CRITICAL"||issue.Severity=="MAJOR"{pendingIssues++}}}}}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
 	}
-	runningTasks:=0
-	for _,item:=range a.tasks.List(""){if item.Status==task.StatusPending||item.Status==task.StatusRunning{runningTasks++}}
-	average:=0;if qualityTotal>0{average=qualityScore/qualityTotal}
-	writeJSON(w,http.StatusOK,map[string]any{"projects":len(projects),"documents":documentCount,"knowledgeSources":sourceCount,"pendingIssues":pendingIssues,"runningTasks":runningTasks,"averageQualityScore":average})
+	documentCount, sourceCount, pendingIssues, qualityTotal, qualityScore := 0, 0, 0, 0, 0
+	for _, item := range projects {
+		if docs, docErr := a.docs.List(r.Context(), item.ID); docErr == nil {
+			documentCount += len(docs)
+		}
+		if sources, sourceErr := a.knowledge.ListSources(r.Context(), item.ID); sourceErr == nil {
+			sourceCount += len(sources)
+		}
+		if a.quality != nil {
+			if results, resultErr := a.quality.List(r.Context(), item.ID, 200); resultErr == nil {
+				for _, result := range results {
+					qualityTotal++
+					qualityScore += result.Score
+					for _, issue := range result.Result.Result.Issues {
+						if issue.Severity == "CRITICAL" || issue.Severity == "MAJOR" {
+							pendingIssues++
+						}
+					}
+				}
+			}
+		}
+	}
+	runningTasks := 0
+	for _, item := range a.tasks.List("") {
+		if item.Status == task.StatusPending || item.Status == task.StatusRunning {
+			runningTasks++
+		}
+	}
+	average := 0
+	if qualityTotal > 0 {
+		average = qualityScore / qualityTotal
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": len(projects), "documents": documentCount, "knowledgeSources": sourceCount, "pendingIssues": pendingIssues, "runningTasks": runningTasks, "averageQualityScore": average})
 }
 
 func (a *API) createProject(w http.ResponseWriter, r *http.Request) {

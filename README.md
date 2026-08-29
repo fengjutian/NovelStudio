@@ -153,6 +153,8 @@ POLISHER_MODEL=polisher-model
 
 `VALIDATOR_MODELS` 支持逗号分隔的多个模型，它们会并行、独立校验。只有 Critical/Major 问题存在模型分歧时才调用 Judge，以控制成本。API Key 只由 Go 服务读取，不会通过状态接口或 Web 页面返回。
 
+也可以在“模型与校验”页面配置 DeepSeek 或 MiniMax。配置写入本机 `.local/model-config.json`，该目录已被 Git 忽略，API Key 不进入数据库且不会通过读取接口回显。保存后重启 Go API 生效；可用 `MODEL_CONFIG_PATH` 修改本地配置文件位置。
+
 ## 架构原则
 
 ```text
