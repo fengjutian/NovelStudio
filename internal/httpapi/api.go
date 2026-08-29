@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/knowledge"
+	"novelstudio/internal/modelconfig"
 	"novelstudio/internal/project"
 	"novelstudio/internal/qualityhistory"
 	"novelstudio/internal/task"
@@ -38,6 +40,7 @@ type API struct {
 	logger    *slog.Logger
 	runs      airun.Recorder
 	quality   qualityhistory.Store
+	modelConfig modelconfig.Store
 }
 
 func New(store project.Store, logger *slog.Logger) http.Handler {
@@ -59,7 +62,8 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	if tasks == nil {
 		tasks = task.NewManager()
 	}
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, logger: logger}
+	configPath:=strings.TrimSpace(os.Getenv("MODEL_CONFIG_PATH"));if configPath==""{configPath=filepath.Join(".local","model-config.json")}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, modelConfig:modelconfig.Store{Path:configPath}, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
@@ -92,6 +96,8 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
 	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
+	mux.HandleFunc("GET /api/v1/models/local-config", a.getLocalModelConfig)
+	mux.HandleFunc("PUT /api/v1/models/local-config", a.updateLocalModelConfig)
 	mux.HandleFunc("GET /api/v1/projects/{id}/ai-runs", a.listAIRuns)
 	mux.HandleFunc("GET /api/v1/projects/{id}/quality-results", a.listQualityResults)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
@@ -573,6 +579,9 @@ func (a *API) modelStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"configured": configured, "validatorCount": validatorCount, "judgeConfigured": judgeConfigured, "generationOperations": generationOperations})
 }
+
+func(a *API)getLocalModelConfig(w http.ResponseWriter,_ *http.Request){config,err:=a.modelConfig.Public();if err!=nil{writeError(w,http.StatusInternalServerError,"CONFIG_READ_FAILED",err.Error());return};writeJSON(w,http.StatusOK,config)}
+func(a *API)updateLocalModelConfig(w http.ResponseWriter,r *http.Request){var input modelconfig.UpdateInput;if !decodeJSON(w,r,&input){return};config,err:=a.modelConfig.Save(input);if err!=nil{writeError(w,http.StatusUnprocessableEntity,"CONFIG_SAVE_FAILED",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"config":config,"restartRequired":true})}
 
 func (a *API) listAIRuns(w http.ResponseWriter, r *http.Request) {
 	if a.runs == nil {
