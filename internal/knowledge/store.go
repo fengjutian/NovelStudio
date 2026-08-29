@@ -25,6 +25,10 @@ type Store interface {
 	CreateMemory(context.Context, string, CreateMemoryInput) (MemoryEntry, error)
 	ListMemories(context.Context, string, string) ([]MemoryEntry, error)
 	DeleteMemory(context.Context, string) error
+	CreateFileAsset(context.Context, CreateFileAssetInput) (FileAsset, error)
+	ListFileAssets(context.Context, string) ([]FileAsset, error)
+	GetFileAsset(context.Context, string) (FileAsset, error)
+	DeleteFileAsset(context.Context, string) (FileAsset, error)
 }
 
 type MemoryStore struct {
@@ -35,11 +39,17 @@ type MemoryStore struct {
 	chunks    map[string][]Chunk
 	facts     map[string]Fact
 	memories  map[string]MemoryEntry
+	files     map[string]FileAsset
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{sources: make(map[string]Source), projectID: make(map[string]string), chunks: make(map[string][]Chunk), facts: make(map[string]Fact), memories: make(map[string]MemoryEntry)}
+	return &MemoryStore{sources: make(map[string]Source), projectID: make(map[string]string), chunks: make(map[string][]Chunk), facts: make(map[string]Fact), memories: make(map[string]MemoryEntry), files: make(map[string]FileAsset)}
 }
+
+func(s *MemoryStore)CreateFileAsset(_ context.Context,input CreateFileAssetInput)(FileAsset,error){if strings.TrimSpace(input.ProjectID)==""||strings.TrimSpace(input.Name)==""{return FileAsset{},errors.New("projectId and name are required")};item:=FileAsset{ID:s.nextID("fil"),ProjectID:input.ProjectID,Name:input.Name,Extension:input.Extension,MIMEType:input.MIMEType,Size:input.Size,Status:input.Status,StoragePath:input.StoragePath,SourceID:input.SourceID,CreatedAt:time.Now().UTC()};s.mu.Lock();s.files[item.ID]=item;s.mu.Unlock();return item,nil}
+func(s *MemoryStore)ListFileAssets(_ context.Context,projectID string)([]FileAsset,error){s.mu.RLock();defer s.mu.RUnlock();items:=[]FileAsset{};for _,item:=range s.files{if projectID==""||item.ProjectID==projectID{items=append(items,item)}};sort.Slice(items,func(i,j int)bool{return items[i].CreatedAt.After(items[j].CreatedAt)});return items,nil}
+func(s *MemoryStore)GetFileAsset(_ context.Context,id string)(FileAsset,error){s.mu.RLock();defer s.mu.RUnlock();item,ok:=s.files[id];if !ok{return FileAsset{},ErrNotFound};return item,nil}
+func(s *MemoryStore)DeleteFileAsset(_ context.Context,id string)(FileAsset,error){s.mu.Lock();defer s.mu.Unlock();item,ok:=s.files[id];if !ok{return FileAsset{},ErrNotFound};delete(s.files,id);return item,nil}
 
 func (s *MemoryStore) CreateMemory(_ context.Context, projectID string, input CreateMemoryInput) (MemoryEntry, error) {
 	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))

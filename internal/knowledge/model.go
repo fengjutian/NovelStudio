@@ -87,3 +87,8 @@ type CreateMemoryInput struct {
 	Status     string         `json:"status"`
 	Attributes map[string]any `json:"attributes"`
 }
+
+type FileAsset struct {
+	ID string `json:"id"`; ProjectID string `json:"projectId"`; Name string `json:"name"`; Extension string `json:"extension"`; MIMEType string `json:"mimeType"`; Size int64 `json:"size"`; Status string `json:"status"`; StoragePath string `json:"-"`; SourceID string `json:"sourceId,omitempty"`; CreatedAt time.Time `json:"createdAt"`
+}
+type CreateFileAssetInput struct { ProjectID string; Name string; Extension string; MIMEType string; Size int64; Status string; StoragePath string; SourceID string }
