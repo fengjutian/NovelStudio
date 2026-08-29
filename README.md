@@ -8,6 +8,8 @@
 - 按项目模板初始化的内容树
 - 项目列表、创建、详情、删除和内容树 API
 - React 项目工作台和创建项目界面
+- 渐进式 UI 体系：原生 CSS + Tailwind CSS v4 + shadcn/ui 源码组件
+- Lucide React 图标、Sonner 通知和 CodeMirror 6 Markdown 编辑器
 - 文档不可变版本、版本历史和非破坏性恢复
 - Markdown 文档编辑、手动/自动保存和乐观并发控制
 - 知识来源录入、结构分块、项目隔离检索和权威来源排序

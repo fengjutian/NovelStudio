@@ -10,4 +10,15 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': 'http://localhost:8080', '/healthz': 'http://localhost:8080' },
   },
+  build: {
+    chunkSizeWarningLimit: 550,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          editor: ['codemirror', '@codemirror/lang-markdown'],
+          react: ['react', 'react-dom', '@tanstack/react-query'],
+        },
+      },
+    },
+  },
 })

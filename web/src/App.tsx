@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {CircleGauge,Clock3,Database,Download,Home,Plus} from 'lucide-react'
+import {ArrowLeft,ArrowRight,CircleGauge,Clock3,Database,Download,Home,MoreHorizontal,Plus} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {Button} from './components/ui/button'
+import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from './components/ui/dialog'
+import {Input} from './components/ui/input'
 import type { ProjectType } from './types'
 import type { Document, GenerationResult, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
 
@@ -56,7 +58,7 @@ export function App() {
         <div className="sidebar-foot">
           <div className="avatar">CF</div>
           <div><strong>创作者</strong><small>本地工作区</small></div>
-          <button aria-label="设置">•••</button>
+          <button aria-label="设置"><MoreHorizontal size={16}/></button>
         </div>
       </aside>
 
@@ -82,7 +84,7 @@ export function App() {
             const info = typeInfo[project.type]
             return <article className="project-card" key={project.id} onClick={() => { setSelectedTab('documents'); setSelected(project) }}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
-              <div className="project-top"><span>{info.label}</span><button aria-label="项目菜单">•••</button></div>
+              <div className="project-top"><span>{info.label}</span><button aria-label="项目菜单"><MoreHorizontal size={16}/></button></div>
               <h3>{project.name}</h3>
               <p>{project.description || '尚未添加项目描述'}</p>
               <div className="progress"><i style={{ width: project.status === 'DRAFT' ? '18%' : '60%' }} /></div>
@@ -90,23 +92,21 @@ export function App() {
             </article>
           })}
           {projectQuery && projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeInfo[project.type].label}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).length===0&&<p className="empty-line">没有匹配的项目</p>}
-          <button className="new-card" onClick={() => setOpen(true)}><span>＋</span><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
+          <button className="new-card" onClick={() => setOpen(true)}><Plus/><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
         </section>
         </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} onOpen={(project, tab) => { setSelectedTab(tab); setSelected(project) }} />}
       </main>
 
-      {open && <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
-        <form className="dialog" onSubmit={submit}>
-          <div className="dialog-head"><div><p className="eyebrow">NEW PROJECT</p><h2>创建内容项目</h2></div><button type="button" onClick={() => setOpen(false)}>×</button></div>
-          <label>项目名称<input autoFocus required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：产品 API 使用指南" /></label>
+      <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dialog"><form onSubmit={submit}>
+          <DialogHeader className="dialog-head"><div><p className="eyebrow">NEW PROJECT</p><DialogTitle>创建内容项目</DialogTitle><DialogDescription>选择内容类型并填写项目目标。</DialogDescription></div></DialogHeader>
+          <label>项目名称<Input autoFocus required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：产品 API 使用指南" /></label>
           <fieldset><legend>内容类型</legend><div className="type-grid">
             {(Object.keys(typeInfo) as ProjectType[]).map((value) => <button className={type === value ? 'selected' : ''} type="button" key={value} onClick={() => setType(value)}><b>{typeInfo[value].icon}</b><span>{typeInfo[value].label}</span></button>)}
           </div></fieldset>
           <label>创作说明<textarea rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="描述目标、受众和内容要求…" /></label>
           {create.isError && <p className="form-error">{create.error.message}</p>}
           <div className="dialog-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>取消</button><button className="primary" disabled={create.isPending}>{create.isPending ? '创建中…' : '创建项目'}</button></div>
-        </form>
-      </div>}
+        </form></DialogContent></Dialog>
       {selected && <Workspace project={selected} initialTab={selectedTab} onClose={() => setSelected(null)} />}
       <Toaster richColors position="top-right"/>
     </div>
@@ -122,7 +122,7 @@ function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 
 
   if (page === 'knowledge') return <>
     <header><div><p className="eyebrow">KNOWLEDGE BASE</p><h1>知识库</h1><p>按项目管理权威资料、事实来源和检索上下文。</p></div></header>
-    <section className="global-panel"><div className="section-head"><div><h2>选择项目</h2><p>知识来源按项目严格隔离</p></div></div><div className="global-list">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project, 'knowledge')}><span className={`project-icon ${typeInfo[project.type].accent}`}>{typeInfo[project.type].icon}</span><div><strong>{project.name}</strong><small>{typeInfo[project.type].label} · 管理知识来源与检索</small></div><b>打开知识库 →</b></button>)}</div></section>
+    <section className="global-panel"><div className="section-head"><div><h2>选择项目</h2><p>知识来源按项目严格隔离</p></div></div><div className="global-list">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project, 'knowledge')}><span className={`project-icon ${typeInfo[project.type].accent}`}>{typeInfo[project.type].icon}</span><div><strong>{project.name}</strong><small>{typeInfo[project.type].label} · 管理知识来源与检索</small></div><b>打开知识库 <ArrowRight size={13}/></b></button>)}</div></section>
   </>
 
   if (page === 'tasks') return <>
@@ -177,7 +177,7 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
   const validationResult = activeTask.data?.result
 
   return <div className="workspace-layer">
-    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}><Download size={14}/> 导出 Markdown</a><span>草稿工作区</span></div>
+    <div className="workspace-bar"><button onClick={onClose}><ArrowLeft size={14}/> 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}><Download size={14}/> 导出 Markdown</a><span>草稿工作区</span></div>
     <div className="workspace-body">
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'structure' ? 'selected' : ''} onClick={() => setTab('structure')}>内容结构</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'memory' ? 'selected' : ''} onClick={() => setTab('memory')}>Story Memory</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><button className={tab === 'runs' ? 'selected' : ''} onClick={() => setTab('runs')}>AI 运行记录</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
@@ -302,7 +302,7 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
   }
 
   return <section className="document-editor">
-    <div className="editor-head"><button onClick={onBack}>← 文档列表</button><div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
+    <div className="editor-head"><button onClick={onBack}><ArrowLeft size={14}/> 文档列表</button><div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
     {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
     <div className="copilot-bar"><strong>AI Copilot</strong><span>{selection.end>selection.start?`已选择 ${selection.end-selection.start} 字符`:'未选择时处理全文'}</span>{['润色','扩写','缩写','改写','续写','总结','分析','检查'].map(action=><button disabled={copilot.isPending||copilotTask.data?.status==='RUNNING'} onClick={()=>copilot.mutate(action)} key={action}>{action}</button>)}</div>
     {(copilot.isPending||copilotTask.data?.status==='RUNNING')&&<div className="copilot-status">AI 正在处理选中文本…</div>}{(copilot.isError||copilotTask.data?.status==='FAILED')&&<p className="quality-error">{copilot.error?.message||copilotTask.data?.error}</p>}
