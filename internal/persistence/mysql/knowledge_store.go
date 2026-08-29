@@ -54,6 +54,21 @@ func (s KnowledgeStore) DeleteFileAsset(ctx context.Context, id string) (knowled
 	return item, err
 }
 
+func (s KnowledgeStore) DeleteSource(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM knowledge_sources WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return knowledge.ErrNotFound
+	}
+	return nil
+}
+
 func (s KnowledgeStore) CreateMemory(ctx context.Context, projectID string, input knowledge.CreateMemoryInput) (knowledge.MemoryEntry, error) {
 	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
 	input.Name = strings.TrimSpace(input.Name)

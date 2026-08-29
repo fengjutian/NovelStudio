@@ -108,6 +108,9 @@ POST   /api/v1/projects/{id}/fact-extraction-tasks
 GET    /api/v1/projects/{id}/knowledge/facts
 PUT    /api/v1/facts/{id}/status
 POST   /api/v1/projects/{id}/knowledge/files
+GET    /api/v1/knowledge/files?projectId={id}
+GET    /api/v1/knowledge/files/{id}/download
+DELETE /api/v1/knowledge/files/{id}
 POST   /api/v1/projects/{id}/nodes
 PUT    /api/v1/nodes/{id}
 DELETE /api/v1/nodes/{id}
@@ -115,6 +118,8 @@ GET    /api/v1/tasks/{id}
 POST   /api/v1/tasks/{id}/cancel
 GET    /api/v1/tasks/{id}/events
 ```
+
+“知识库”主页面是全局文件资产中心，可跨项目管理 PDF、Word、PowerPoint、图片、Markdown 和常用文本文件。原文件默认保存在 `.local/uploads`（可通过 `KNOWLEDGE_UPLOAD_DIR` 修改），不写入数据库；数据库只记录文件元数据。Markdown、TXT、JSON、CSV 和 HTML 会同步建立文本索引，PDF、Office 文档和图片当前先以原文件形式安全存储并显示“已存储”状态。
 
 创建文档版本时可以携带编辑器加载时的版本 ID：
 

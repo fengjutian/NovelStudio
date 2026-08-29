@@ -54,3 +54,38 @@ func TestMemoryLifecycleIsProjectScoped(t *testing.T) {
 		t.Fatalf("memory was not deleted: %#v", items)
 	}
 }
+
+func TestFileAssetLifecycleAndProjectFilter(t *testing.T) {
+	store := knowledge.NewMemoryStore()
+	first, err := store.CreateFileAsset(context.Background(), knowledge.CreateFileAssetInput{
+		ProjectID: "p1", Name: "manual.pdf", Extension: ".pdf", MIMEType: "application/pdf",
+		Size: 2048, Status: "STORED", StoragePath: "p1/manual.pdf",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateFileAsset(context.Background(), knowledge.CreateFileAssetInput{
+		ProjectID: "p2", Name: "notes.md", Extension: ".md", Size: 128,
+		Status: "INDEXED", StoragePath: "p2/notes.md", SourceID: "src-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := store.ListFileAssets(context.Background(), "")
+	projectFiles, _ := store.ListFileAssets(context.Background(), "p1")
+	if len(all) != 2 || len(projectFiles) != 1 || projectFiles[0].ID != first.ID {
+		t.Fatalf("all=%#v projectFiles=%#v", all, projectFiles)
+	}
+	got, err := store.GetFileAsset(context.Background(), first.ID)
+	if err != nil || got.Name != "manual.pdf" {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+	deleted, err := store.DeleteFileAsset(context.Background(), first.ID)
+	if err != nil || deleted.ID != first.ID {
+		t.Fatalf("deleted=%#v err=%v", deleted, err)
+	}
+	if _, err := store.GetFileAsset(context.Background(), first.ID); err == nil {
+		t.Fatal("deleted file asset is still readable")
+	}
+}

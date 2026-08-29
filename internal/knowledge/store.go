@@ -18,6 +18,7 @@ var ErrNotFound = errors.New("knowledge source not found")
 type Store interface {
 	ListSources(context.Context, string) ([]Source, error)
 	CreateSource(context.Context, CreateSourceInput) (Source, []Chunk, error)
+	DeleteSource(context.Context, string) error
 	Search(context.Context, string, string, int) ([]SearchHit, error)
 	CreateFacts(context.Context, string, []CreateFactInput) ([]Fact, error)
 	ListFacts(context.Context, string) ([]Fact, error)
@@ -86,6 +87,18 @@ func (s *MemoryStore) DeleteFileAsset(_ context.Context, id string) (FileAsset, 
 	}
 	delete(s.files, id)
 	return item, nil
+}
+
+func (s *MemoryStore) DeleteSource(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sources[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.sources, id)
+	delete(s.projectID, id)
+	delete(s.chunks, id)
+	return nil
 }
 
 func (s *MemoryStore) CreateMemory(_ context.Context, projectID string, input CreateMemoryInput) (MemoryEntry, error) {

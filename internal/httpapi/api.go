@@ -224,6 +224,9 @@ func (a *API) deleteKnowledgeFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
 		return
 	}
+	if item.SourceID != "" {
+		_ = a.knowledge.DeleteSource(r.Context(), item.SourceID)
+	}
 	_ = os.Remove(filepath.Join(knowledgeUploadRoot(), item.StoragePath))
 	w.WriteHeader(http.StatusNoContent)
 }
