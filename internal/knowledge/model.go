@@ -68,3 +68,8 @@ type CreateFactInput struct {
 	SourceChunkID string  `json:"sourceChunkId"`
 	Confidence    float64 `json:"confidence"`
 }
+
+type MemoryEntry struct {
+	ID string `json:"id"`; ProjectID string `json:"projectId"`; Type string `json:"type"`; Name string `json:"name"`; Summary string `json:"summary"`; Status string `json:"status"`; Attributes map[string]any `json:"attributes,omitempty"`; CreatedAt time.Time `json:"createdAt"`; UpdatedAt time.Time `json:"updatedAt"`
+}
+type CreateMemoryInput struct { Type string `json:"type"`; Name string `json:"name"`; Summary string `json:"summary"`; Status string `json:"status"`; Attributes map[string]any `json:"attributes"` }

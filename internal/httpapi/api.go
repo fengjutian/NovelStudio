@@ -85,6 +85,9 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/projects/{id}/knowledge/files", a.uploadKnowledgeFile)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/search", a.searchKnowledge)
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/facts", a.listFacts)
+	mux.HandleFunc("GET /api/v1/projects/{id}/memories", a.listMemories)
+	mux.HandleFunc("POST /api/v1/projects/{id}/memories", a.createMemory)
+	mux.HandleFunc("DELETE /api/v1/memories/{id}", a.deleteMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
 	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
@@ -373,6 +376,9 @@ func (a *API) listFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
+func(a *API)listMemories(w http.ResponseWriter,r *http.Request){items,err:=a.knowledge.ListMemories(r.Context(),r.PathValue("id"),strings.ToUpper(r.URL.Query().Get("type")));if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items)})}
+func(a *API)createMemory(w http.ResponseWriter,r *http.Request){projectID:=r.PathValue("id");if _,err:=a.store.Get(r.Context(),projectID);err!=nil{a.handleStoreError(w,err);return};var input knowledge.CreateMemoryInput;if !decodeJSON(w,r,&input){return};item,err:=a.knowledge.CreateMemory(r.Context(),projectID,input);if err!=nil{writeError(w,http.StatusUnprocessableEntity,"VALIDATION_FAILED",err.Error());return};writeJSON(w,http.StatusCreated,item)}
+func(a *API)deleteMemory(w http.ResponseWriter,r *http.Request){if err:=a.knowledge.DeleteMemory(r.Context(),r.PathValue("id"));err!=nil{if errors.Is(err,knowledge.ErrNotFound){writeError(w,http.StatusNotFound,"NOT_FOUND",err.Error())}else{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error())};return};w.WriteHeader(http.StatusNoContent)}
 func (a *API) updateFactStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Status string `json:"status"`

@@ -57,6 +57,7 @@ export interface SearchHit {
 export interface ContentNode { id:string; projectId:string; parentId?:string; documentId?:string; nodeType:string; title:string; position:number; metadata?:Record<string,unknown> }
 export interface OutlineItem { title:string; level:number; nodeType:string }
 export interface Fact { id:string; projectId:string; subject:string; predicate:string; object:string; confidence:number; status:string; createdAt:string }
+export interface MemoryEntry { id:string;projectId:string;type:'CHARACTER'|'PLACE'|'TIMELINE'|'PLOT'|'FORESHADOW';name:string;summary:string;status:string;attributes?:Record<string,unknown>;createdAt:string;updatedAt:string }
 
 export interface AIRun { id:string; projectId:string; taskId?:string; role:string; provider:string; model:string; promptVersion:string; requestId?:string; inputTokens:number; outputTokens:number; latencyMs:number; status:string; error?:string; createdAt:string }
 export interface AIRunList { items:AIRun[]; total:number; stats:{inputTokens:number;outputTokens:number;latencyMs:number} }
