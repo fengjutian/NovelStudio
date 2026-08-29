@@ -14,6 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   projects: () => request<ProjectList>('/api/v1/projects'),
+  dashboardStats:()=>request<{projects:number;documents:number;knowledgeSources:number;pendingIssues:number;runningTasks:number;averageQualityScore:number}>('/api/v1/dashboard/stats'),
   createProject: (input: { name: string; type: ProjectType; description: string }) =>
     request<Project>('/api/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
   documents: (projectId: string) => request<{ items: Document[]; total: number }>(`/api/v1/projects/${projectId}/documents`),

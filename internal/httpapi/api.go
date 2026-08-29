@@ -64,6 +64,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
 	mux.HandleFunc("GET /api/v1/projects", a.listProjects)
+	mux.HandleFunc("GET /api/v1/dashboard/stats", a.dashboardStats)
 	mux.HandleFunc("POST /api/v1/projects", a.createProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}", a.getProject)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", a.deleteProject)
@@ -905,6 +906,21 @@ func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) dashboardStats(w http.ResponseWriter, r *http.Request) {
+	projects, err := a.store.List(r.Context())
+	if err != nil { writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return }
+	documentCount,sourceCount,pendingIssues,qualityTotal,qualityScore:=0,0,0,0,0
+	for _,item:=range projects{
+		if docs,docErr:=a.docs.List(r.Context(),item.ID);docErr==nil{documentCount+=len(docs)}
+		if sources,sourceErr:=a.knowledge.ListSources(r.Context(),item.ID);sourceErr==nil{sourceCount+=len(sources)}
+		if a.quality!=nil{if results,resultErr:=a.quality.List(r.Context(),item.ID,200);resultErr==nil{for _,result:=range results{qualityTotal++;qualityScore+=result.Score;for _,issue:=range result.Result.Result.Issues{if issue.Severity=="CRITICAL"||issue.Severity=="MAJOR"{pendingIssues++}}}}}
+	}
+	runningTasks:=0
+	for _,item:=range a.tasks.List(""){if item.Status==task.StatusPending||item.Status==task.StatusRunning{runningTasks++}}
+	average:=0;if qualityTotal>0{average=qualityScore/qualityTotal}
+	writeJSON(w,http.StatusOK,map[string]any{"projects":len(projects),"documents":documentCount,"knowledgeSources":sourceCount,"pendingIssues":pendingIssues,"runningTasks":runningTasks,"averageQualityScore":average})
 }
 
 func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
