@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import {CircleGauge,Clock3,Database,Download,Home,Plus} from 'lucide-react'
+import {Toaster,toast} from 'sonner'
+import {MarkdownEditor} from './components/MarkdownEditor'
 import type { ProjectType } from './types'
 import type { Document, GenerationResult, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
 
@@ -30,6 +33,7 @@ export function App() {
       setOpen(false)
       setName('')
       setDescription('')
+      toast.success('项目创建成功')
     },
   })
 
@@ -43,10 +47,10 @@ export function App() {
       <aside className="sidebar">
         <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><span>字</span><strong>Content Studio</strong></a>
         <nav>
-          <a className={activeNav === 'projects' ? 'active' : ''} href="#projects" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><span>⌂</span>项目</a>
-          <a className={activeNav === 'knowledge' ? 'active' : ''} href="#knowledge" onClick={(event) => { event.preventDefault(); setActiveNav('knowledge') }}><span>◇</span>知识库</a>
-          <a className={activeNav === 'tasks' ? 'active' : ''} href="#tasks" onClick={(event) => { event.preventDefault(); setActiveNav('tasks') }}><span>◷</span>任务中心</a>
-          <a className={activeNav === 'models' ? 'active' : ''} href="#models" onClick={(event) => { event.preventDefault(); setActiveNav('models') }}><span>◎</span>模型与校验</a>
+          <a className={activeNav === 'projects' ? 'active' : ''} href="#projects" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><Home/>项目</a>
+          <a className={activeNav === 'knowledge' ? 'active' : ''} href="#knowledge" onClick={(event) => { event.preventDefault(); setActiveNav('knowledge') }}><Database/>知识库</a>
+          <a className={activeNav === 'tasks' ? 'active' : ''} href="#tasks" onClick={(event) => { event.preventDefault(); setActiveNav('tasks') }}><Clock3/>任务中心</a>
+          <a className={activeNav === 'models' ? 'active' : ''} href="#models" onClick={(event) => { event.preventDefault(); setActiveNav('models') }}><CircleGauge/>模型与校验</a>
         </nav>
         <div className="sidebar-foot">
           <div className="avatar">CF</div>
@@ -59,7 +63,7 @@ export function App() {
         {activeNav === 'projects' ? <>
         <header>
           <div><p className="eyebrow">WORKSPACE</p><h1>创作项目</h1><p>用知识与多模型协作，构建可信的长篇内容。</p></div>
-          <button className="primary" onClick={() => setOpen(true)}>＋ 新建项目</button>
+          <button className="primary" onClick={() => setOpen(true)}><Plus size={16}/> 新建项目</button>
         </header>
 
         <section className="metrics">
@@ -103,6 +107,7 @@ export function App() {
         </form>
       </div>}
       {selected && <Workspace project={selected} initialTab={selectedTab} onClose={() => setSelected(null)} />}
+      <Toaster richColors position="top-right"/>
     </div>
   )
 }
@@ -171,7 +176,7 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
   const validationResult = activeTask.data?.result
 
   return <div className="workspace-layer">
-    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}>↓ 导出 Markdown</a><span>草稿工作区</span></div>
+    <div className="workspace-bar"><button onClick={onClose}>← 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}><Download size={14}/> 导出 Markdown</a><span>草稿工作区</span></div>
     <div className="workspace-body">
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'structure' ? 'selected' : ''} onClick={() => setTab('structure')}>内容结构</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'memory' ? 'selected' : ''} onClick={() => setTab('memory')}>Story Memory</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><button className={tab === 'runs' ? 'selected' : ''} onClick={() => setTab('runs')}>AI 运行记录</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
@@ -243,7 +248,6 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
   const [savedContent, setSavedContent] = useState('')
   const [autoSave, setAutoSave] = useState(false)
   const [compareFrom, setCompareFrom] = useState('')
-  const editorRef=useRef<HTMLTextAreaElement|null>(null)
   const [selection,setSelection]=useState({start:0,end:0})
   const copilotRange=useRef({start:0,end:0})
   const [copilotTaskId,setCopilotTaskId]=useState('')
@@ -301,7 +305,7 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
     {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
     <div className="copilot-bar"><strong>AI Copilot</strong><span>{selection.end>selection.start?`已选择 ${selection.end-selection.start} 字符`:'未选择时处理全文'}</span>{['润色','扩写','缩写','改写','续写','总结','分析','检查'].map(action=><button disabled={copilot.isPending||copilotTask.data?.status==='RUNNING'} onClick={()=>copilot.mutate(action)} key={action}>{action}</button>)}</div>
     {(copilot.isPending||copilotTask.data?.status==='RUNNING')&&<div className="copilot-status">AI 正在处理选中文本…</div>}{(copilot.isError||copilotTask.data?.status==='FAILED')&&<p className="quality-error">{copilot.error?.message||copilotTask.data?.error}</p>}
-    <div className="editor-layout"><div className="markdown-pane"><textarea ref={editorRef} value={content} onSelect={event=>setSelection({start:event.currentTarget.selectionStart,end:event.currentTarget.selectionEnd})} onChange={(event) => setContent(event.target.value)} placeholder="开始编写 Markdown 内容…" /><footer><span>{content.length} 字符</span><span>{dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <div className="version-actions"><button className="restore" onClick={() => setCompareFrom(version.id)}>与最新版比较</button><button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复</button></div>}</article>)}</aside></div>
+    <div className="editor-layout"><div className="markdown-pane"><MarkdownEditor value={content} onChange={setContent} onSelectionChange={(start,end)=>setSelection({start,end})}/><footer><span>{content.length} 字符</span><span>{dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <div className="version-actions"><button className="restore" onClick={() => setCompareFrom(version.id)}>与最新版比较</button><button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复</button></div>}</article>)}</aside></div>
     {diff.data&&<section className="diff-panel"><header><div><h3>版本差异</h3><small>新增 {diff.data.added} 行 · 删除 {diff.data.deleted} 行</small></div><button onClick={()=>setCompareFrom('')}>关闭</button></header><pre>{diff.data.lines.map((line,index)=><span className={line.type.toLowerCase()} key={`${index}-${line.oldLine}-${line.newLine}`}><i>{line.oldLine??' '}</i><i>{line.newLine??' '}</i><b>{line.type==='ADDED'?'+':line.type==='DELETED'?'-':' '}</b>{line.content||' '}</span>)}</pre></section>}
   </section>
 }
