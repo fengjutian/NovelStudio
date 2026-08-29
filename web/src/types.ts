@@ -55,6 +55,7 @@ export interface SearchHit {
   matchType: string
 }
 export interface ContentNode { id:string; projectId:string; parentId?:string; documentId?:string; nodeType:string; title:string; position:number; metadata?:Record<string,unknown> }
+export interface OutlineItem { title:string; level:number; nodeType:string }
 export interface Fact { id:string; projectId:string; subject:string; predicate:string; object:string; confidence:number; status:string; createdAt:string }
 
 export interface AIRun { id:string; projectId:string; taskId?:string; role:string; provider:string; model:string; promptVersion:string; requestId?:string; inputTokens:number; outputTokens:number; latencyMs:number; status:string; error?:string; createdAt:string }
@@ -83,7 +84,7 @@ export interface GenerationResult {
   generation: { content: string; operation: string; promptVersion: string; provider: string; model: string; inputTokens: number; outputTokens: number; latencyMs: number; evidenceIds: string[] }
   document?: Document
   documentId?: string
-  version: DocumentVersion
+  version?: DocumentVersion
 }
 
 export interface QualityGenerationResult {

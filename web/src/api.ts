@@ -1,4 +1,4 @@
-import type { AIRunList, AITask, ContentNode, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeSource, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
+import type { AIRunList, AITask, ContentNode, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeSource, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -32,7 +32,7 @@ export const api = {
   searchKnowledge: (projectId: string, query: string) =>
     request<{ items: SearchHit[]; total: number }>(`/api/v1/projects/${projectId}/knowledge/search?q=${encodeURIComponent(query)}`),
   modelStatus: () => request<{ configured: boolean; validatorCount: number; judgeConfigured: boolean; generationOperations: string[] }>('/api/v1/models/status'),
-  createGenerationTask: (projectId: string, input: { operation: string; instruction: string; title: string; documentId: string; knowledgeQuery: string }) =>
+  createGenerationTask: (projectId: string, input: { operation: string; instruction: string; title: string; documentId: string; knowledgeQuery: string; content?:string; save?:boolean }) =>
     request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/generation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
   createValidationTask: (projectId: string, input: { text: string; task: string; knowledgeQuery: string; dimensions: string[] }) =>
     request<AITask>(`/api/v1/projects/${projectId}/validation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
@@ -42,6 +42,7 @@ export const api = {
   retryTask: (taskId:string) => request<AITask>(`/api/v1/tasks/${taskId}/retry`,{method:'POST'}),
   tree: (projectId:string) => request<{items:ContentNode[]}>(`/api/v1/projects/${projectId}/tree`),
   createNode: (projectId:string,input:{parentId?:string;nodeType:string;title:string;position:number}) => request<ContentNode>(`/api/v1/projects/${projectId}/nodes`,{method:'POST',body:JSON.stringify(input)}),
+  importOutline: (projectId:string,input:{content:string;parentId?:string;preview:boolean}) => request<{items:OutlineItem[]|ContentNode[];total:number}>(`/api/v1/projects/${projectId}/outline-import`,{method:'POST',body:JSON.stringify(input)}),
   updateNode: (id:string,input:{title:string;position:number;metadata?:Record<string,unknown>;documentId?:string}) => request<ContentNode>(`/api/v1/nodes/${id}`,{method:'PUT',body:JSON.stringify(input)}),
   deleteNode: (id:string) => request<void>(`/api/v1/nodes/${id}`,{method:'DELETE'}),
   batchGenerate: (projectId:string,input:{nodeIds:string[];instruction:string;knowledgeQuery:string;windowSize:number}) => request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/batch-generation-tasks`,{method:'POST',body:JSON.stringify(input)}),

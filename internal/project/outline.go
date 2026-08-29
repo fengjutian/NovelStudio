@@ -19,14 +19,22 @@ func ParseOutline(content string, projectType Type) ([]OutlineItem, error) {
 	minimum := 7
 	for _, raw := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
 		match := markdownHeading.FindStringSubmatch(strings.TrimSpace(raw))
-		if len(match) != 3 { continue }
+		if len(match) != 3 {
+			continue
+		}
 		title := strings.TrimSpace(strings.Trim(match[2], "#"))
-		if title == "" { continue }
+		if title == "" {
+			continue
+		}
 		level := len(match[1])
-		if level < minimum { minimum = level }
-		items = append(items, OutlineItem{Title:title, Level:level})
+		if level < minimum {
+			minimum = level
+		}
+		items = append(items, OutlineItem{Title: title, Level: level})
 	}
-	if len(items) == 0 { return nil, errors.New("outline must contain Markdown headings") }
+	if len(items) == 0 {
+		return nil, errors.New("outline must contain Markdown headings")
+	}
 	for index := range items {
 		items[index].Level = items[index].Level - minimum + 1
 		items[index].NodeType = outlineNodeType(projectType, items[index].Level)
@@ -36,14 +44,22 @@ func ParseOutline(content string, projectType Type) ([]OutlineItem, error) {
 
 func outlineNodeType(projectType Type, level int) string {
 	if projectType == TypeMovieCommentary {
-		if level == 1 { return "ACT" }
+		if level == 1 {
+			return "ACT"
+		}
 		return "COMMENTARY_SEGMENT"
 	}
 	if projectType == TypeTechnicalDocument {
-		if level == 1 { return "MODULE" }
+		if level == 1 {
+			return "MODULE"
+		}
 		return "SECTION"
 	}
-	if level == 1 { return "VOLUME" }
-	if level == 2 { return "CHAPTER" }
+	if level == 1 {
+		return "VOLUME"
+	}
+	if level == 2 {
+		return "CHAPTER"
+	}
 	return "SECTION"
 }

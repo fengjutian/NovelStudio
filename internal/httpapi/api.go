@@ -70,6 +70,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/export.md", a.exportProjectMarkdown)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tree", a.getTree)
 	mux.HandleFunc("POST /api/v1/projects/{id}/nodes", a.createNode)
+	mux.HandleFunc("POST /api/v1/projects/{id}/outline-import", a.importOutline)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}", a.updateNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", a.deleteNode)
 	mux.HandleFunc("GET /api/v1/projects/{id}/documents", a.listDocuments)
@@ -267,6 +268,82 @@ func (a *API) createNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func (a *API) importOutline(w http.ResponseWriter, r *http.Request) {
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Content  string `json:"content"`
+		ParentID string `json:"parentId"`
+		Preview  bool   `json:"preview"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	items, err := project.ParseOutline(input.Content, projectItem.Type)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_OUTLINE", err.Error())
+		return
+	}
+	if input.Preview {
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+		return
+	}
+	tree, treeErr := a.store.Tree(r.Context(), projectItem.ID)
+	if treeErr != nil {
+		a.handleStoreError(w, treeErr)
+		return
+	}
+	found := input.ParentID == ""
+	positions := map[string]int{}
+	for _, node := range tree {
+		if node.ID == input.ParentID {
+			found = true
+		}
+		parent := ""
+		if node.ParentID != nil {
+			parent = *node.ParentID
+		}
+		if node.Position > positions[parent] {
+			positions[parent] = node.Position
+		}
+	}
+	if !found {
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_PARENT", "parent node not found in project")
+		return
+	}
+	created := make([]project.ContentNode, 0, len(items))
+	parents := map[int]string{}
+	for _, outlineItem := range items {
+		parentID := input.ParentID
+		for level := outlineItem.Level - 1; level >= 1; level-- {
+			if value := parents[level]; value != "" {
+				parentID = value
+				break
+			}
+		}
+		positions[parentID]++
+		var parent *string
+		if parentID != "" {
+			value := parentID
+			parent = &value
+		}
+		node, createErr := a.store.CreateNode(r.Context(), projectItem.ID, project.CreateNodeInput{ParentID: parent, NodeType: outlineItem.NodeType, Title: outlineItem.Title, Position: positions[parentID], Metadata: map[string]any{"outlineLevel": outlineItem.Level}})
+		if createErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, "IMPORT_FAILED", createErr.Error())
+			return
+		}
+		created = append(created, node)
+		parents[outlineItem.Level] = node.ID
+		for level := outlineItem.Level + 1; level <= 6; level++ {
+			delete(parents, level)
+		}
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"items": created, "total": len(created)})
 }
 func (a *API) updateNode(w http.ResponseWriter, r *http.Request) {
 	var input project.UpdateNodeInput
@@ -496,6 +573,7 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		DocumentID     string               `json:"documentId"`
 		Content        string               `json:"content"`
 		KnowledgeQuery string               `json:"knowledgeQuery"`
+		Save           *bool                `json:"save"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -548,6 +626,9 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 			return nil, generateErr
 		}
 		progress(85, "模型输出完成，正在创建文档版本")
+		if input.Save != nil && !*input.Save {
+			return map[string]any{"generation": generated}, nil
+		}
 		if input.DocumentID == "" {
 			doc, version, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: title, Content: generated.Content})
 			if createErr != nil {

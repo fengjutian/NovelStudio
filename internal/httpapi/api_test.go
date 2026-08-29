@@ -56,6 +56,26 @@ func TestRejectsUnsupportedProjectType(t *testing.T) {
 	}
 }
 
+func TestOutlineImportCreatesHierarchy(t *testing.T) {
+	projects := project.NewMemoryStore()
+	handler := httpapi.New(projects, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	items, _ := projects.List(context.Background())
+	projectID := items[0].ID
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/outline-import", bytes.NewBufferString(`{"content":"# 第一卷\n## 第一章\n### 第一节","preview":false}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	tree, err := projects.Tree(context.Background(), projectID)
+	if err != nil || len(tree) < 5 {
+		t.Fatalf("tree=%#v err=%v", tree, err)
+	}
+	created := tree[len(tree)-3:]
+	if created[1].ParentID == nil || *created[1].ParentID != created[0].ID || created[2].ParentID == nil || *created[2].ParentID != created[1].ID {
+		t.Fatalf("unexpected hierarchy: %#v", created)
+	}
+}
+
 func TestDocumentAndKnowledgeLifecycle(t *testing.T) {
 	handler := httpapi.New(project.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	list := httptest.NewRecorder()
