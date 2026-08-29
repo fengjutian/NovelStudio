@@ -1,4 +1,4 @@
-import type { AIRunList, AITask, ContentNode, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeSource, MemoryEntry, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
+import type { AIRunList, AITask, ContentNode, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeSource, LocalModelConfig, MemoryEntry, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -33,6 +33,8 @@ export const api = {
   searchKnowledge: (projectId: string, query: string) =>
     request<{ items: SearchHit[]; total: number }>(`/api/v1/projects/${projectId}/knowledge/search?q=${encodeURIComponent(query)}`),
   modelStatus: () => request<{ configured: boolean; validatorCount: number; judgeConfigured: boolean; generationOperations: string[] }>('/api/v1/models/status'),
+  localModelConfig:()=>request<LocalModelConfig>('/api/v1/models/local-config'),
+  saveLocalModelConfig:(input:unknown)=>request<{config:LocalModelConfig;restartRequired:boolean}>('/api/v1/models/local-config',{method:'PUT',body:JSON.stringify(input)}),
   createGenerationTask: (projectId: string, input: { operation: string; instruction: string; title: string; documentId: string; knowledgeQuery: string; content?:string; save?:boolean }) =>
     request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/generation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
   createValidationTask: (projectId: string, input: { text: string; task: string; knowledgeQuery: string; dimensions: string[] }) =>
