@@ -34,3 +34,23 @@ func TestSearchIsProjectScoped(t *testing.T) {
 		t.Fatalf("hits=%d err=%v", len(hits), err)
 	}
 }
+
+func TestMemoryLifecycleIsProjectScoped(t *testing.T) {
+	store := knowledge.NewMemoryStore()
+	created, err := store.CreateMemory(context.Background(), "p1", knowledge.CreateMemoryInput{Type: "CHARACTER", Name: "沈砚", Summary: "县衙书吏"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _ := store.ListMemories(context.Background(), "p1", "CHARACTER")
+	other, _ := store.ListMemories(context.Background(), "p2", "")
+	if len(items) != 1 || items[0].ID != created.ID || len(other) != 0 {
+		t.Fatalf("items=%#v other=%#v", items, other)
+	}
+	if err := store.DeleteMemory(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, _ = store.ListMemories(context.Background(), "p1", "")
+	if len(items) != 0 {
+		t.Fatalf("memory was not deleted: %#v", items)
+	}
+}

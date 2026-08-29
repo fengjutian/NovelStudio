@@ -200,7 +200,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		}
 		nodes = append(nodes, node)
 	}
-	evidence := []generation.Evidence{}
+	evidence := a.memoryEvidence(r.Context(), projectItem.ID)
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
 		if searchErr != nil {
@@ -376,9 +376,53 @@ func (a *API) listFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
-func(a *API)listMemories(w http.ResponseWriter,r *http.Request){items,err:=a.knowledge.ListMemories(r.Context(),r.PathValue("id"),strings.ToUpper(r.URL.Query().Get("type")));if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return};writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items)})}
-func(a *API)createMemory(w http.ResponseWriter,r *http.Request){projectID:=r.PathValue("id");if _,err:=a.store.Get(r.Context(),projectID);err!=nil{a.handleStoreError(w,err);return};var input knowledge.CreateMemoryInput;if !decodeJSON(w,r,&input){return};item,err:=a.knowledge.CreateMemory(r.Context(),projectID,input);if err!=nil{writeError(w,http.StatusUnprocessableEntity,"VALIDATION_FAILED",err.Error());return};writeJSON(w,http.StatusCreated,item)}
-func(a *API)deleteMemory(w http.ResponseWriter,r *http.Request){if err:=a.knowledge.DeleteMemory(r.Context(),r.PathValue("id"));err!=nil{if errors.Is(err,knowledge.ErrNotFound){writeError(w,http.StatusNotFound,"NOT_FOUND",err.Error())}else{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error())};return};w.WriteHeader(http.StatusNoContent)}
+func (a *API) listMemories(w http.ResponseWriter, r *http.Request) {
+	items, err := a.knowledge.ListMemories(r.Context(), r.PathValue("id"), strings.ToUpper(r.URL.Query().Get("type")))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+func (a *API) createMemory(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input knowledge.CreateMemoryInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.knowledge.CreateMemory(r.Context(), projectID, input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+func (a *API) deleteMemory(w http.ResponseWriter, r *http.Request) {
+	if err := a.knowledge.DeleteMemory(r.Context(), r.PathValue("id")); err != nil {
+		if errors.Is(err, knowledge.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) memoryEvidence(ctx context.Context, projectID string) []generation.Evidence {
+	items, err := a.knowledge.ListMemories(ctx, projectID, "")
+	if err != nil { return nil }
+	if len(items) > 30 { items = items[:30] }
+	evidence := make([]generation.Evidence, 0, len(items))
+	for _, item := range items {
+		evidence = append(evidence, generation.Evidence{ID:item.ID, Source:"Story Memory / "+item.Type+" / "+item.Name, Authority:"INTERNAL", Content:item.Summary})
+	}
+	return evidence
+}
 func (a *API) updateFactStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Status string `json:"status"`
@@ -471,6 +515,7 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
+	genRequest.Evidence = append(genRequest.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
 	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
@@ -593,6 +638,7 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
+	request.Evidence = append(request.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
 		if searchErr != nil {

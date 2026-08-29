@@ -3,8 +3,8 @@ package mysql
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,9 +16,50 @@ type KnowledgeStore struct{ DB *sql.DB }
 
 var _ knowledge.Store = KnowledgeStore{}
 
-func (s KnowledgeStore) CreateMemory(ctx context.Context, projectID string, input knowledge.CreateMemoryInput)(knowledge.MemoryEntry,error){input.Type=strings.ToUpper(strings.TrimSpace(input.Type));input.Name=strings.TrimSpace(input.Name);if input.Name==""||(input.Type!="CHARACTER"&&input.Type!="PLACE"&&input.Type!="TIMELINE"&&input.Type!="PLOT"&&input.Type!="FORESHADOW"){return knowledge.MemoryEntry{},errors.New("valid type and name are required")};if input.Status==""{input.Status="ACTIVE"};now:=time.Now().UTC();item:=knowledge.MemoryEntry{ID:newID("mem"),ProjectID:projectID,Type:input.Type,Name:input.Name,Summary:strings.TrimSpace(input.Summary),Status:strings.ToUpper(input.Status),Attributes:input.Attributes,CreatedAt:now,UpdatedAt:now};raw,_:=json.Marshal(item.Attributes);_,err:=s.DB.ExecContext(ctx,`INSERT INTO story_memories(id,project_id,memory_type,name,summary,status,attributes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,item.ID,item.ProjectID,item.Type,item.Name,item.Summary,item.Status,raw,now,now);return item,err}
-func(s KnowledgeStore)ListMemories(ctx context.Context,projectID,memoryType string)([]knowledge.MemoryEntry,error){rows,err:=s.DB.QueryContext(ctx,`SELECT id,project_id,memory_type,name,summary,status,attributes,created_at,updated_at FROM story_memories WHERE project_id=? AND (?='' OR memory_type=?) ORDER BY updated_at DESC`,projectID,memoryType,memoryType);if err!=nil{return nil,err};defer rows.Close();items:=[]knowledge.MemoryEntry{};for rows.Next(){var item knowledge.MemoryEntry;var raw []byte;if err:=rows.Scan(&item.ID,&item.ProjectID,&item.Type,&item.Name,&item.Summary,&item.Status,&raw,&item.CreatedAt,&item.UpdatedAt);err!=nil{return nil,err};_ = json.Unmarshal(raw,&item.Attributes);items=append(items,item)};return items,rows.Err()}
-func(s KnowledgeStore)DeleteMemory(ctx context.Context,id string)error{result,err:=s.DB.ExecContext(ctx,`DELETE FROM story_memories WHERE id=?`,id);if err!=nil{return err};count,_:=result.RowsAffected();if count==0{return knowledge.ErrNotFound};return nil}
+func (s KnowledgeStore) CreateMemory(ctx context.Context, projectID string, input knowledge.CreateMemoryInput) (knowledge.MemoryEntry, error) {
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || (input.Type != "CHARACTER" && input.Type != "PLACE" && input.Type != "TIMELINE" && input.Type != "PLOT" && input.Type != "FORESHADOW") {
+		return knowledge.MemoryEntry{}, errors.New("valid type and name are required")
+	}
+	if input.Status == "" {
+		input.Status = "ACTIVE"
+	}
+	now := time.Now().UTC()
+	item := knowledge.MemoryEntry{ID: newID("mem"), ProjectID: projectID, Type: input.Type, Name: input.Name, Summary: strings.TrimSpace(input.Summary), Status: strings.ToUpper(input.Status), Attributes: input.Attributes, CreatedAt: now, UpdatedAt: now}
+	raw, _ := json.Marshal(item.Attributes)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO story_memories(id,project_id,memory_type,name,summary,status,attributes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, item.ID, item.ProjectID, item.Type, item.Name, item.Summary, item.Status, raw, now, now)
+	return item, err
+}
+func (s KnowledgeStore) ListMemories(ctx context.Context, projectID, memoryType string) ([]knowledge.MemoryEntry, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,project_id,memory_type,name,summary,status,attributes,created_at,updated_at FROM story_memories WHERE project_id=? AND (?='' OR memory_type=?) ORDER BY updated_at DESC`, projectID, memoryType, memoryType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []knowledge.MemoryEntry{}
+	for rows.Next() {
+		var item knowledge.MemoryEntry
+		var raw []byte
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Type, &item.Name, &item.Summary, &item.Status, &raw, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(raw, &item.Attributes)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+func (s KnowledgeStore) DeleteMemory(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM story_memories WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return knowledge.ErrNotFound
+	}
+	return nil
+}
 
 func (s KnowledgeStore) CreateFacts(ctx context.Context, projectID string, inputs []knowledge.CreateFactInput) ([]knowledge.Fact, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)

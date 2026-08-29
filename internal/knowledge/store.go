@@ -41,10 +41,47 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{sources: make(map[string]Source), projectID: make(map[string]string), chunks: make(map[string][]Chunk), facts: make(map[string]Fact), memories: make(map[string]MemoryEntry)}
 }
 
-func (s *MemoryStore) CreateMemory(_ context.Context, projectID string, input CreateMemoryInput) (MemoryEntry,error) { input.Type=strings.ToUpper(strings.TrimSpace(input.Type));input.Name=strings.TrimSpace(input.Name);if !validMemoryType(input.Type)||input.Name==""{return MemoryEntry{},errors.New("valid type and name are required")};now:=time.Now().UTC();if input.Status==""{input.Status="ACTIVE"};item:=MemoryEntry{ID:s.nextID("mem"),ProjectID:projectID,Type:input.Type,Name:input.Name,Summary:strings.TrimSpace(input.Summary),Status:strings.ToUpper(input.Status),Attributes:input.Attributes,CreatedAt:now,UpdatedAt:now};s.mu.Lock();s.memories[item.ID]=item;s.mu.Unlock();return item,nil }
-func (s *MemoryStore) ListMemories(_ context.Context, projectID,memoryType string)([]MemoryEntry,error){s.mu.RLock();defer s.mu.RUnlock();memoryType=strings.ToUpper(memoryType);items:=[]MemoryEntry{};for _,item:=range s.memories{if item.ProjectID==projectID&&(memoryType==""||item.Type==memoryType){items=append(items,item)}};sort.Slice(items,func(i,j int)bool{return items[i].UpdatedAt.After(items[j].UpdatedAt)});return items,nil}
-func (s *MemoryStore) DeleteMemory(_ context.Context,id string)error{s.mu.Lock();defer s.mu.Unlock();if _,ok:=s.memories[id];!ok{return ErrNotFound};delete(s.memories,id);return nil}
-func validMemoryType(value string)bool{return value=="CHARACTER"||value=="PLACE"||value=="TIMELINE"||value=="PLOT"||value=="FORESHADOW"}
+func (s *MemoryStore) CreateMemory(_ context.Context, projectID string, input CreateMemoryInput) (MemoryEntry, error) {
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.Name = strings.TrimSpace(input.Name)
+	if !validMemoryType(input.Type) || input.Name == "" {
+		return MemoryEntry{}, errors.New("valid type and name are required")
+	}
+	now := time.Now().UTC()
+	if input.Status == "" {
+		input.Status = "ACTIVE"
+	}
+	item := MemoryEntry{ID: s.nextID("mem"), ProjectID: projectID, Type: input.Type, Name: input.Name, Summary: strings.TrimSpace(input.Summary), Status: strings.ToUpper(input.Status), Attributes: input.Attributes, CreatedAt: now, UpdatedAt: now}
+	s.mu.Lock()
+	s.memories[item.ID] = item
+	s.mu.Unlock()
+	return item, nil
+}
+func (s *MemoryStore) ListMemories(_ context.Context, projectID, memoryType string) ([]MemoryEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	memoryType = strings.ToUpper(memoryType)
+	items := []MemoryEntry{}
+	for _, item := range s.memories {
+		if item.ProjectID == projectID && (memoryType == "" || item.Type == memoryType) {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	return items, nil
+}
+func (s *MemoryStore) DeleteMemory(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.memories[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.memories, id)
+	return nil
+}
+func validMemoryType(value string) bool {
+	return value == "CHARACTER" || value == "PLACE" || value == "TIMELINE" || value == "PLOT" || value == "FORESHADOW"
+}
 
 func (s *MemoryStore) CreateFacts(_ context.Context, projectID string, inputs []CreateFactInput) ([]Fact, error) {
 	s.mu.Lock()
