@@ -52,3 +52,25 @@ func TestStaleVersionIsRejected(t *testing.T) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 }
+
+func TestListKeepsCreationOrderAfterEdit(t *testing.T) {
+	store := document.NewMemoryStore()
+	first, firstVersion, err := store.Create(context.Background(), document.CreateInput{ProjectID: "p1", Title: "第一章", Content: "初稿"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.Create(context.Background(), document.CreateInput{ProjectID: "p1", Title: "第二章", Content: "初稿"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateVersion(context.Background(), first.ID, document.CreateVersionInput{Content: "修改稿", ExpectedVersionID: firstVersion.ID}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.List(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != first.ID || items[1].ID != second.ID {
+		t.Fatalf("document order changed after edit: %#v", items)
+	}
+}

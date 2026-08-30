@@ -15,7 +15,7 @@ type DocumentStore struct{ DB *sql.DB }
 var _ document.Store = DocumentStore{}
 
 func (s DocumentStore) List(ctx context.Context, projectID string) ([]document.Document, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,project_id,title,COALESCE(current_version_id,''),version_count,created_at,updated_at FROM documents WHERE project_id=? AND deleted_at IS NULL ORDER BY updated_at DESC`, projectID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,project_id,title,COALESCE(current_version_id,''),version_count,created_at,updated_at FROM documents WHERE project_id=? AND deleted_at IS NULL ORDER BY created_at ASC,id ASC`, projectID)
 	if err != nil {
 		return nil, err
 	}
