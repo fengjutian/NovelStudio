@@ -83,6 +83,9 @@ MYSQL_DSN=contentstudio:contentstudio@tcp(localhost:3306)/contentstudio?parseTim
 ```text
 GET    /healthz
 GET    /api/v1/project-types
+POST   /api/v1/project-types
+PUT    /api/v1/project-types/{code}
+DELETE /api/v1/project-types/{code}
 GET    /api/v1/projects
 POST   /api/v1/projects
 GET    /api/v1/projects/{id}
