@@ -21,6 +21,16 @@ const normalizeGeneratedOutline=(content:string)=>{
   return headings.length?headings.join('\n'):cleaned
 }
 
+type ChapterGeneratorDraft={requirement:string;outline:string;bookTitle:string;knowledgeQuery:string;splitMode:'LEAF'|'ALL';nodeIds:string[]}
+const chapterDraftKey=(projectId:string)=>`novelstudio:chapter-generator:${projectId}`
+const loadChapterDraft=(project:Project):ChapterGeneratorDraft=>{
+  const fallback:ChapterGeneratorDraft={requirement:'',outline:'',bookTitle:project.name,knowledgeQuery:'',splitMode:'LEAF',nodeIds:[]}
+  try{
+    const saved=localStorage.getItem(chapterDraftKey(project.id))
+    return saved?{...fallback,...JSON.parse(saved)}:fallback
+  }catch{return fallback}
+}
+
 export function App() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -237,6 +247,8 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   const activeTask = useQuery({ queryKey: ['task', taskId], queryFn: () => api.task(taskId), enabled: taskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
   const generationTask = useQuery({ queryKey: ['generation-task', generationTaskId], queryFn: () => api.task<GenerationResult>(generationTaskId), enabled: generationTaskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
   const qualityTask = useQuery({ queryKey: ['quality-generation-task', qualityTaskId], queryFn: () => api.task<QualityGenerationResult>(qualityTaskId), enabled: qualityTaskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
+  useEffect(()=>setSelectedDocument(null),[project.id])
+  useEffect(()=>{if(documentMode==='library'&&!selectedDocument&&documents.data?.items[0])setSelectedDocument(documents.data.items[0])},[documentMode,selectedDocument,documents.data])
   const expandTask=useQuery({queryKey:['expand-task',expandTaskId],queryFn:()=>api.task<GenerationResult>(expandTaskId),enabled:Boolean(expandTaskId),refetchInterval:query=>['SUCCESS','FAILED','CANCELLED'].includes(query.state.data?.status??'')?false:1000})
   const createDocument = useMutation({ mutationFn: () => api.createDocument(project.id, { title, content }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents', project.id] }); setTitle(''); setContent('') } })
   const createSource = useMutation({ mutationFn: () => api.createSource(project.id, { name: sourceName, authority, content: sourceContent }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sources', project.id] }); setSourceName(''); setSourceContent('') } })
@@ -254,10 +266,11 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'structure' ? 'selected' : ''} onClick={() => setTab('structure')}>内容结构</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'memory' ? 'selected' : ''} onClick={() => setTab('memory')}>Story Memory</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><button className={tab === 'runs' ? 'selected' : ''} onClick={() => setTab('runs')}>AI 运行记录</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">
         {tab === 'documents' ? <>
-          {selectedDocument ? <DocumentEditor document={selectedDocument} onBack={() => { setSelectedDocument(null); queryClient.invalidateQueries({ queryKey: ['documents', project.id] }) }} /> : <>
-            <div className="document-module-head"><div><Sparkles/><div><h2>章节文档生成器</h2><p>描述需求，生成并调整目录，再批量创建 Markdown 文档。</p></div></div><nav><button className={documentMode==='generator'?'active':''} onClick={()=>setDocumentMode('generator')}>生成器</button><button className={documentMode==='library'?'active':''} onClick={()=>setDocumentMode('library')}>文档工作区</button><span>{documents.data?.total??0} 个文档</span></nav></div>
-            {documentMode==='generator'?<ChapterDocumentGenerator project={project} documents={documents.data?.items??[]} modelReady={modelStatus.data?.generationOperations??[]} onOpenDocument={setSelectedDocument}/>:<><form className="studio-form document-create-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><div className="draft-textarea-wrap"><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button type="button" className="ai-expand-trigger" onClick={()=>{setExpandTaskId('');setExpandOpen(true)}}><Sparkles size={15}/>AI 扩写</button></div><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form><div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div></>}
-          </>}
+          <div className="document-module-head"><div><Sparkles/><div><h2>章节文档生成器</h2><p>描述需求，生成并调整目录，再批量创建 Markdown 文档。</p></div></div><nav><button className={documentMode==='generator'?'active':''} onClick={()=>setDocumentMode('generator')}>生成器</button><button className={documentMode==='library'?'active':''} onClick={()=>setDocumentMode('library')}>文档工作区</button><span>{documents.data?.total??0} 个文档</span></nav></div>
+          {documentMode==='generator'?<ChapterDocumentGenerator project={project} documents={documents.data?.items??[]} modelReady={modelStatus.data?.generationOperations??[]} onOpenDocument={document=>{setSelectedDocument(document);setDocumentMode('library')}}/>:<div className="document-workbench">
+            <aside className="document-browser"><header><div><strong>{project.name}</strong><small>{documents.data?.total??0} 个 Markdown 文档</small></div></header><div className="document-browser-list">{documents.data?.items.map(item=><button className={selectedDocument?.id===item.id?'selected':''} onClick={()=>setSelectedDocument(item)} key={item.id}><FileText size={16}/><span><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></span></button>)}{documents.data?.total===0&&<p className="empty-line">暂无文档，请先通过生成器创建。</p>}</div></aside>
+            <section className="document-workbench-main">{selectedDocument?<DocumentEditor key={selectedDocument.id} document={selectedDocument} embedded onBack={()=>setSelectedDocument(null)}/>:<div className="document-workbench-empty"><FileText/><strong>选择一篇文档开始编辑</strong><span>正文将使用 Markdown 编辑器打开，并保留版本历史。</span></div>}</section>
+          </div>}
         </> : tab === 'structure' ? <><OutlineImporter project={project}/><StructurePanel project={project} documents={documents.data?.items ?? []} /></> : tab === 'generation' ? <>
           <div className="workspace-title"><div><p className="eyebrow">AGENT PIPELINE</p><h2>AI 内容创作</h2><p>使用 Planner、Outliner、Writer 或 Polisher，并将结果自动保存为文档版本。</p></div></div>
           <div className={`model-status ${(modelStatus.data?.generationOperations?.length ?? 0) > 0 ? 'ready' : 'offline'}`}><strong>{(modelStatus.data?.generationOperations?.length ?? 0) > 0 ? '创作模型已就绪' : '创作模型未配置'}</strong><span>{modelStatus.data?.generationOperations?.join(' · ') || '请配置 WRITER_MODEL 或角色专用模型'}</span></div>
@@ -306,18 +319,30 @@ function ChapterDocumentGenerator(props:{project:Project;documents:Document[];mo
 
 function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocument}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
   const queryClient=useQueryClient()
-  const[requirement,setRequirement]=useState('')
-  const[outline,setOutline]=useState('')
-  const[bookTitle,setBookTitle]=useState(project.name)
-  const[knowledgeQuery,setKnowledgeQuery]=useState('')
-  const[splitMode,setSplitMode]=useState<'LEAF'|'ALL'>('LEAF')
+  const initialDraft=useRef(loadChapterDraft(project)).current
+  const draftProjectId=useRef(project.id)
+  const[requirement,setRequirement]=useState(initialDraft.requirement)
+  const[outline,setOutline]=useState(initialDraft.outline)
+  const[bookTitle,setBookTitle]=useState(initialDraft.bookTitle)
+  const[knowledgeQuery,setKnowledgeQuery]=useState(initialDraft.knowledgeQuery)
+  const[splitMode,setSplitMode]=useState<'LEAF'|'ALL'>(initialDraft.splitMode)
   const[outlineTaskId,setOutlineTaskId]=useState('')
-  const[nodeIds,setNodeIds]=useState<string[]>([])
+  const[nodeIds,setNodeIds]=useState<string[]>(initialDraft.nodeIds)
   const[batchTaskId,setBatchTaskId]=useState('')
   const[assistOpen,setAssistOpen]=useState(false)
   const[assistPrompt,setAssistPrompt]=useState('')
   const[assistTaskId,setAssistTaskId]=useState('')
   const appliedTask=useRef('')
+  useEffect(()=>{
+    if(draftProjectId.current!==project.id)return
+    try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}
+  },[project.id,requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds])
+  useEffect(()=>{
+    if(draftProjectId.current===project.id)return
+    const draft=loadChapterDraft(project)
+    setRequirement(draft.requirement);setOutline(draft.outline);setBookTitle(draft.bookTitle);setKnowledgeQuery(draft.knowledgeQuery);setSplitMode(draft.splitMode);setNodeIds(draft.nodeIds)
+    setOutlineTaskId('');setBatchTaskId('');setAssistTaskId('');appliedTask.current='';draftProjectId.current=project.id
+  },[project])
   const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const assistTask=useQuery({queryKey:['chapter-brief-assist-task',assistTaskId],queryFn:()=>api.task<GenerationResult>(assistTaskId),enabled:Boolean(assistTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
@@ -395,7 +420,7 @@ function KnowledgeExtras({project,documents}:{project:Project;documents:Document
   return <section className="knowledge-extras"><form className="inline-form" onSubmit={(e)=>{e.preventDefault();upload.mutate()}}><input required type="file" accept=".txt,.md,.markdown,.json,.csv,.html,.htm" onChange={(e)=>setFile(e.target.files?.[0]??null)}/><button className="primary" disabled={!file||upload.isPending}>上传知识文件</button></form><form className="inline-form" onSubmit={(e)=>{e.preventDefault();extract.mutate()}}><select required value={documentId} onChange={(e)=>setDocumentId(e.target.value)}><option value="">选择文档抽取事实</option>{documents.map(doc=><option value={doc.id} key={doc.id}>{doc.title}</option>)}</select><button className="primary" disabled={!documentId||extract.isPending}>抽取事实</button></form><div className="fact-list"><h3>结构化事实 <span>{facts.data?.total??0}</span></h3>{facts.data?.items.map(fact=><article key={fact.id}><div><strong>{fact.subject} · {fact.predicate} · {fact.object}</strong><small>{fact.status} · 置信度 {Math.round(fact.confidence*100)}%</small></div>{fact.status==='PROPOSED'&&<span><button onClick={()=>update.mutate({id:fact.id,status:'CONFIRMED'})}>确认</button><button onClick={()=>update.mutate({id:fact.id,status:'REJECTED'})}>拒绝</button></span>}</article>)}</div></section>
 }
 
-function DocumentEditor({ document, onBack }: { document: Document; onBack: () => void }) {
+function DocumentEditor({ document, onBack, embedded=false }: { document: Document; onBack: () => void; embedded?:boolean }) {
   const queryClient = useQueryClient()
   const [content, setContent] = useState('')
   const [baseVersionId, setBaseVersionId] = useState('')
@@ -454,8 +479,8 @@ function DocumentEditor({ document, onBack }: { document: Document; onBack: () =
     save.reset()
   }
 
-  return <section className="document-editor">
-    <div className="editor-head"><button onClick={onBack}><ArrowLeft size={14}/> 文档列表</button><div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
+  return <section className={embedded?'document-editor embedded':'document-editor'}>
+    <div className="editor-head">{!embedded&&<button onClick={onBack}><ArrowLeft size={14}/> 文档列表</button>}<div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
     {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
     <div className="copilot-bar"><strong>AI Copilot</strong><span>{selection.end>selection.start?`已选择 ${selection.end-selection.start} 字符`:'未选择时处理全文'}</span>{['润色','扩写','缩写','改写','续写','总结','分析','检查'].map(action=><button disabled={copilot.isPending||copilotTask.data?.status==='RUNNING'} onClick={()=>copilot.mutate(action)} key={action}>{action}</button>)}</div>
     {(copilot.isPending||copilotTask.data?.status==='RUNNING')&&<div className="copilot-status">AI 正在处理选中文本…</div>}{(copilot.isError||copilotTask.data?.status==='FAILED')&&<p className="quality-error">{copilot.error?.message||copilotTask.data?.error}</p>}
