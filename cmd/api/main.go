@@ -84,7 +84,7 @@ func generationService(recorder airun.Recorder) *generation.Service {
 	if baseURL == "" {
 		return nil
 	}
-	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY")})
+	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY"), Timeout: modelRequestTimeout()})
 	if err != nil {
 		slog.Error("invalid generation model configuration", "error", err)
 		return nil
@@ -118,6 +118,15 @@ func first(values ...string) string {
 	return ""
 }
 
+func modelRequestTimeout() time.Duration {
+	timeout, err := time.ParseDuration(env("LLM_REQUEST_TIMEOUT", "5m"))
+	if err != nil || timeout <= 0 {
+		slog.Warn("invalid LLM_REQUEST_TIMEOUT; using 5m", "value", os.Getenv("LLM_REQUEST_TIMEOUT"))
+		return 5 * time.Minute
+	}
+	return timeout
+}
+
 func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, *task.Manager, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
@@ -145,7 +154,7 @@ func validationPipeline(recorder airun.Recorder) *validation.Pipeline {
 		slog.Warn("model validation disabled; configure LLM_BASE_URL and VALIDATOR_MODELS")
 		return nil
 	}
-	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY")})
+	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: baseURL, APIKey: os.Getenv("LLM_API_KEY"), Timeout: modelRequestTimeout()})
 	if err != nil {
 		slog.Error("invalid LLM configuration", "error", err)
 		return nil
