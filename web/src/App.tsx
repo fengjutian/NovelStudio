@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {ArrowLeft,ArrowRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Pencil,Plus,Shapes,Search,Trash2,Upload} from 'lucide-react'
+import {ArrowLeft,ArrowRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Pencil,Plus,Shapes,Search,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {Button} from './components/ui/button'
@@ -189,6 +189,10 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   const [tab, setTab] = useState<WorkspaceTab>(initialTab)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [expandOpen,setExpandOpen]=useState(false)
+  const [expandInstruction,setExpandInstruction]=useState('保持现有内容的语气、结构和事实基础，补充细节、过渡与论述，使内容更加完整。')
+  const [expandQuery,setExpandQuery]=useState('')
+  const [expandTaskId,setExpandTaskId]=useState('')
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
   const [sourceName, setSourceName] = useState('')
   const [sourceContent, setSourceContent] = useState('')
@@ -214,12 +218,14 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   const activeTask = useQuery({ queryKey: ['task', taskId], queryFn: () => api.task(taskId), enabled: taskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
   const generationTask = useQuery({ queryKey: ['generation-task', generationTaskId], queryFn: () => api.task<GenerationResult>(generationTaskId), enabled: generationTaskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
   const qualityTask = useQuery({ queryKey: ['quality-generation-task', qualityTaskId], queryFn: () => api.task<QualityGenerationResult>(qualityTaskId), enabled: qualityTaskId.length > 0, refetchInterval: (query) => ['SUCCESS', 'FAILED', 'CANCELLED'].includes(query.state.data?.status ?? '') ? false : 1000 })
+  const expandTask=useQuery({queryKey:['expand-task',expandTaskId],queryFn:()=>api.task<GenerationResult>(expandTaskId),enabled:Boolean(expandTaskId),refetchInterval:query=>['SUCCESS','FAILED','CANCELLED'].includes(query.state.data?.status??'')?false:1000})
   const createDocument = useMutation({ mutationFn: () => api.createDocument(project.id, { title, content }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['documents', project.id] }); setTitle(''); setContent('') } })
   const createSource = useMutation({ mutationFn: () => api.createSource(project.id, { name: sourceName, authority, content: sourceContent }), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['sources', project.id] }); setSourceName(''); setSourceContent('') } })
   const validate = useMutation({ mutationFn: () => api.createValidationTask(project.id, { text: validationText, task: '校验文本的事实依据、一致性、完整性、术语和风格', knowledgeQuery: validationQuery, dimensions: ['groundedness', 'consistency', 'completeness', 'terminology', 'style'] }), onSuccess: (task) => setTaskId(task.id) })
   const cancelTask = useMutation({ mutationFn: () => api.cancelTask(taskId), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['task', taskId] }) })
   const generate = useMutation({ mutationFn: () => api.createGenerationTask(project.id, { operation, instruction, title: generationTitle, documentId: operation === 'POLISH' ? generationDocumentId : '', knowledgeQuery: generationQuery }), onSuccess: (created) => setGenerationTaskId(created.id) })
   const qualityGenerate = useMutation({ mutationFn: () => api.qualityGenerate(project.id, { instruction, title: generationTitle, knowledgeQuery: generationQuery, maxRepairs }), onSuccess: (created) => setQualityTaskId(created.id) })
+  const expand=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'WRITE',instruction:`扩写文档《${title||'未命名文档'}》。${expandInstruction}\n只输出新增或重写后的正文，不要解释处理过程。`,title:title||'AI 扩写',documentId:'',knowledgeQuery:expandQuery,content,save:false}),onSuccess:task=>setExpandTaskId(task.id)})
   const outlineToTree=useMutation({mutationFn:()=>api.importOutline(project.id,{content:generationTask.data!.result!.generation.content,preview:false}),onSuccess:data=>{queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`已创建 ${data.total} 个内容节点`);setTab('structure')}})
   const validationResult = activeTask.data?.result
 
@@ -231,7 +237,7 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
         {tab === 'documents' ? <>
           {selectedDocument ? <DocumentEditor document={selectedDocument} onBack={() => { setSelectedDocument(null); queryClient.invalidateQueries({ queryKey: ['documents', project.id] }) }} /> : <>
             <div className="workspace-title"><div><p className="eyebrow">DOCUMENTS</p><h2>文档与版本</h2><p>每次保存都会形成不可变版本，恢复历史也不会覆盖原始内容。</p></div></div>
-            <form className="studio-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
+            <form className="studio-form document-create-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><div className="draft-textarea-wrap"><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button type="button" className="ai-expand-trigger" onClick={()=>{setExpandTaskId('');setExpandOpen(true)}}><Sparkles size={15}/>AI 扩写</button></div><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
             <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
           </>}
         </> : tab === 'structure' ? <><OutlineImporter project={project}/><StructurePanel project={project} documents={documents.data?.items ?? []} /></> : tab === 'generation' ? <>
@@ -263,6 +269,16 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
         </>}
       </section>
     </div>
+    <Dialog open={expandOpen} onOpenChange={setExpandOpen}><DialogContent className="dialog ai-expand-dialog"><div className="ai-expand-content">
+      <DialogHeader className="content-type-dialog-head"><DialogTitle>AI 扩写</DialogTitle><DialogDescription>AI 会参考当前正文和项目记忆生成扩写结果，确认后才会写回编辑区。</DialogDescription></DialogHeader>
+      <label>扩写要求<textarea rows={4} value={expandInstruction} onChange={event=>setExpandInstruction(event.target.value)} placeholder="例如：扩写到 1500 字，加强场景细节和人物情绪"/></label>
+      <label>知识库检索词<Input value={expandQuery} onChange={event=>setExpandQuery(event.target.value)} placeholder="可选：检索项目知识库作为事实依据"/></label>
+      {!modelStatus.data?.generationOperations?.includes('WRITE')&&<p className="quality-error">写作模型尚未配置，请先在“模型与校验”中启用模型并重启 API。</p>}
+      {!expandTask.data?.result&&<button className="primary expand-run" disabled={!expandInstruction.trim()||expand.isPending||expandTask.data?.status==='RUNNING'||!modelStatus.data?.generationOperations?.includes('WRITE')} onClick={()=>{setExpandTaskId('');expand.mutate()}}><Sparkles size={15}/>{expand.isPending?'正在创建任务…':expandTask.data?.status==='RUNNING'?`正在扩写 ${expandTask.data.progress}%`:'开始扩写'}</button>}
+      {expandTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(expandTask.data.status)&&<div className="task-progress"><div><strong>{expandTask.data.message}</strong><span>{expandTask.data.progress}%</span></div><i><b style={{width:`${expandTask.data.progress}%`}}/></i></div>}
+      {(expand.isError||expandTask.data?.status==='FAILED')&&<p className="quality-error">{expand.error?.message||expandTask.data?.error}</p>}
+      {expandTask.data?.result&&<div className="expand-preview"><div><strong>扩写预览</strong><small>{expandTask.data.result.generation.model} · {expandTask.data.result.generation.outputTokens} tokens</small></div><pre>{expandTask.data.result.generation.content}</pre><div className="dialog-actions"><button className="secondary" onClick={()=>{setExpandTaskId('');expand.mutate()}}>重新生成</button><button className="secondary" onClick={()=>{setContent(value=>value.trim()?`${value.trimEnd()}\n\n${expandTask.data!.result!.generation.content}`:expandTask.data!.result!.generation.content);setExpandOpen(false);toast.success('扩写内容已追加')}}>追加正文</button><button className="primary" onClick={()=>{setContent(expandTask.data!.result!.generation.content);setExpandOpen(false);toast.success('正文已替换')}}>替换正文</button></div></div>}
+    </div></DialogContent></Dialog>
   </div>
 }
 
