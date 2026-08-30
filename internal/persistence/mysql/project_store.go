@@ -196,7 +196,7 @@ func (s ProjectStore) UpdateContentType(ctx context.Context, code project.Type, 
 
 func (s ProjectStore) DeleteContentType(ctx context.Context, code project.Type) error {
 	var used int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE project_type=? AND deleted_at IS NULL`, code).Scan(&used); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE project_type=?`, code).Scan(&used); err != nil {
 		return err
 	}
 	if used > 0 {
