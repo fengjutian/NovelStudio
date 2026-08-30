@@ -23,6 +23,7 @@ import (
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/knowledge"
+	"novelstudio/internal/llm"
 	"novelstudio/internal/modelconfig"
 	"novelstudio/internal/project"
 	"novelstudio/internal/qualityhistory"
@@ -109,6 +110,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/models/status", a.modelStatus)
 	mux.HandleFunc("GET /api/v1/models/local-config", a.getLocalModelConfig)
 	mux.HandleFunc("PUT /api/v1/models/local-config", a.updateLocalModelConfig)
+	mux.HandleFunc("POST /api/v1/models/local-config/test", a.testLocalModelConfig)
 	mux.HandleFunc("GET /api/v1/projects/{id}/ai-runs", a.listAIRuns)
 	mux.HandleFunc("GET /api/v1/projects/{id}/quality-results", a.listQualityResults)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
@@ -714,6 +716,33 @@ func (a *API) updateLocalModelConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": config, "restartRequired": true})
+}
+
+func (a *API) testLocalModelConfig(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Provider string                     `json:"provider"`
+		Config   modelconfig.UpdateProvider `json:"config"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	providerConfig, err := a.modelConfig.ResolveProvider(input.Provider, input.Config)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "MODEL_TEST_INVALID", err.Error())
+		return
+	}
+	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: providerConfig.BaseURL, APIKey: providerConfig.APIKey, Timeout: 30 * time.Second})
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "MODEL_TEST_INVALID", err.Error())
+		return
+	}
+	started := time.Now()
+	result, err := provider.Generate(r.Context(), llm.GenerateRequest{Model: providerConfig.Model, Messages: []llm.Message{{Role: "user", Content: "Reply with OK only."}}, Temperature: 0, MaxTokens: 8})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "MODEL_TEST_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "provider": input.Provider, "model": providerConfig.Model, "latencyMs": time.Since(started).Milliseconds(), "response": result.Content})
 }
 
 func (a *API) listAIRuns(w http.ResponseWriter, r *http.Request) {

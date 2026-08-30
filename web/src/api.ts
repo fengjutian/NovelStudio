@@ -1,10 +1,16 @@
 import type { AIRunList, AITask, ContentNode, ContentType, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeFile, KnowledgeSource, LocalModelConfig, MemoryEntry, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+    })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`无法连接 Go API（localhost:8080），请先启动或重启服务。${detail === 'Failed to fetch' ? '' : ` ${detail}`}`)
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => null)
     throw new Error(data?.error?.message ?? `请求失败 (${response.status})`)
@@ -40,6 +46,7 @@ export const api = {
   modelStatus: () => request<{ configured: boolean; validatorCount: number; judgeConfigured: boolean; generationOperations: string[] }>('/api/v1/models/status'),
   localModelConfig:()=>request<LocalModelConfig>('/api/v1/models/local-config'),
   saveLocalModelConfig:(input:unknown)=>request<{config:LocalModelConfig;restartRequired:boolean}>('/api/v1/models/local-config',{method:'PUT',body:JSON.stringify(input)}),
+  testLocalModelConfig:(input:unknown)=>request<{success:boolean;provider:string;model:string;latencyMs:number;response:string}>('/api/v1/models/local-config/test',{method:'POST',body:JSON.stringify(input)}),
   createGenerationTask: (projectId: string, input: { operation: string; instruction: string; title: string; documentId: string; knowledgeQuery: string; content?:string; save?:boolean }) =>
     request<AITask<GenerationResult>>(`/api/v1/projects/${projectId}/generation-tasks`, { method: 'POST', body: JSON.stringify(input) }),
   createValidationTask: (projectId: string, input: { text: string; task: string; knowledgeQuery: string; dimensions: string[] }) =>

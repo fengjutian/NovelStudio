@@ -111,6 +111,30 @@ func (s Store) Active() (string, Provider, error) {
 	}
 	return "deepseek", config.DeepSeek, nil
 }
+
+// ResolveProvider combines an unsaved form draft with the locally stored secret.
+// A blank API key intentionally keeps the existing key, matching Save semantics.
+func (s Store) ResolveProvider(name string, input UpdateProvider) (Provider, error) {
+	config, err := s.Load()
+	if err != nil {
+		return Provider{}, err
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	var current Provider
+	switch name {
+	case "deepseek":
+		current = config.DeepSeek
+	case "minimax":
+		current = config.MiniMax
+	default:
+		return Provider{}, errors.New("provider must be deepseek or minimax")
+	}
+	provider := merge(current, input)
+	if strings.TrimSpace(provider.BaseURL) == "" || strings.TrimSpace(provider.Model) == "" || strings.TrimSpace(provider.APIKey) == "" {
+		return Provider{}, errors.New("baseUrl, model and apiKey are required")
+	}
+	return provider, nil
+}
 func merge(current Provider, input UpdateProvider) Provider {
 	current.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
 	current.Model = strings.TrimSpace(input.Model)
