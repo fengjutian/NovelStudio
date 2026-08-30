@@ -23,6 +23,7 @@ type Store interface {
 	List(context.Context, string) ([]Document, error)
 	Get(context.Context, string) (Document, error)
 	Create(context.Context, CreateInput) (Document, Version, error)
+	Delete(context.Context, string) error
 	Versions(context.Context, string) ([]Version, error)
 	CreateVersion(context.Context, string, CreateVersionInput) (Version, error)
 	Restore(context.Context, string, string) (Version, error)
@@ -78,6 +79,17 @@ func (s *MemoryStore) Create(_ context.Context, input CreateInput) (Document, Ve
 	s.versions[item.ID] = []Version{version}
 	s.mu.Unlock()
 	return item, version, nil
+}
+
+func (s *MemoryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.documents[id]; !ok {
+		return ErrNotFound
+	}
+	delete(s.documents, id)
+	delete(s.versions, id)
+	return nil
 }
 
 func (s *MemoryStore) Versions(_ context.Context, documentID string) ([]Version, error) {

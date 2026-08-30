@@ -24,6 +24,7 @@ export const api = {
   documents: (projectId: string) => request<{ items: Document[]; total: number }>(`/api/v1/projects/${projectId}/documents`),
   createDocument: (projectId: string, input: { title: string; content: string }) =>
     request<{ document: Document }>(`/api/v1/projects/${projectId}/documents`, { method: 'POST', body: JSON.stringify(input) }),
+  deleteDocument: (documentId: string) => request<void>(`/api/v1/documents/${documentId}`, { method: 'DELETE' }),
   versions: (documentId: string) => request<{ items: DocumentVersion[]; total: number }>(`/api/v1/documents/${documentId}/versions`),
   diffVersions: (documentId:string,from:string,to:string) => request<DocumentDiff>(`/api/v1/documents/${documentId}/diff?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   exportURL: (projectId:string) => `/api/v1/projects/${projectId}/export.md`,

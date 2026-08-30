@@ -88,6 +88,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/documents", a.listDocuments)
 	mux.HandleFunc("POST /api/v1/projects/{id}/documents", a.createDocument)
 	mux.HandleFunc("GET /api/v1/documents/{id}", a.getDocument)
+	mux.HandleFunc("DELETE /api/v1/documents/{id}", a.deleteDocument)
 	mux.HandleFunc("GET /api/v1/documents/{id}/versions", a.listVersions)
 	mux.HandleFunc("GET /api/v1/documents/{id}/diff", a.diffVersions)
 	mux.HandleFunc("POST /api/v1/documents/{id}/versions", a.createVersion)
@@ -1219,6 +1220,14 @@ func (a *API) getDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) deleteDocument(w http.ResponseWriter, r *http.Request) {
+	if err := a.docs.Delete(r.Context(), r.PathValue("id")); err != nil {
+		a.handleDocumentError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) listVersions(w http.ResponseWriter, r *http.Request) {

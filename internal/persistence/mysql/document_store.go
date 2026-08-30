@@ -69,6 +69,19 @@ func (s DocumentStore) Create(ctx context.Context, input document.CreateInput) (
 	return item, version, nil
 }
 
+func (s DocumentStore) Delete(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	result, err := s.DB.ExecContext(ctx, `UPDATE documents SET deleted_at=?,updated_at=? WHERE id=? AND deleted_at IS NULL`, now, now, id)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return document.ErrNotFound
+	}
+	return nil
+}
+
 func (s DocumentStore) Versions(ctx context.Context, documentID string) ([]document.Version, error) {
 	if _, err := s.Get(ctx, documentID); err != nil {
 		return nil, err
