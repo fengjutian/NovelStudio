@@ -194,6 +194,7 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   const [expandQuery,setExpandQuery]=useState('')
   const [expandTaskId,setExpandTaskId]=useState('')
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null)
+  const [documentMode,setDocumentMode]=useState<'generator'|'library'>('generator')
   const [sourceName, setSourceName] = useState('')
   const [sourceContent, setSourceContent] = useState('')
   const [authority, setAuthority] = useState<KnowledgeSource['authority']>('REFERENCE')
@@ -236,9 +237,8 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
       <section className="workspace-content">
         {tab === 'documents' ? <>
           {selectedDocument ? <DocumentEditor document={selectedDocument} onBack={() => { setSelectedDocument(null); queryClient.invalidateQueries({ queryKey: ['documents', project.id] }) }} /> : <>
-            <div className="workspace-title"><div><p className="eyebrow">DOCUMENTS</p><h2>文档与版本</h2><p>每次保存都会形成不可变版本，恢复历史也不会覆盖原始内容。</p></div></div>
-            <form className="studio-form document-create-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><div className="draft-textarea-wrap"><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button type="button" className="ai-expand-trigger" onClick={()=>{setExpandTaskId('');setExpandOpen(true)}}><Sparkles size={15}/>AI 扩写</button></div><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form>
-            <div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div>
+            <div className="document-module-head"><div><Sparkles/><div><h2>章节文档生成器</h2><p>描述需求，生成并调整目录，再批量创建 Markdown 文档。</p></div></div><nav><button className={documentMode==='generator'?'active':''} onClick={()=>setDocumentMode('generator')}>生成器</button><button className={documentMode==='library'?'active':''} onClick={()=>setDocumentMode('library')}>文档工作区</button><span>{documents.data?.total??0} 个文档</span></nav></div>
+            {documentMode==='generator'?<ChapterDocumentGenerator project={project} documents={documents.data?.items??[]} modelReady={modelStatus.data?.generationOperations??[]} onOpenDocument={setSelectedDocument}/>:<><form className="studio-form document-create-form" onSubmit={(e) => { e.preventDefault(); createDocument.mutate() }}><input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文档标题" /><div className="draft-textarea-wrap"><textarea required rows={9} value={content} onChange={(e) => setContent(e.target.value)} placeholder="使用 Markdown 开始写作…" /><button type="button" className="ai-expand-trigger" onClick={()=>{setExpandTaskId('');setExpandOpen(true)}}><Sparkles size={15}/>AI 扩写</button></div><button className="primary" disabled={createDocument.isPending}>保存为初始版本</button></form><div className="resource-list"><h3>项目文档 <span>{documents.data?.total ?? 0}</span></h3>{documents.data?.items.map((item) => <article className="clickable" key={item.id} onClick={() => setSelectedDocument(item)}><div><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div><span>打开编辑器 →</span></article>)}{documents.data?.total === 0 && <p className="empty-line">暂无文档</p>}</div></>}
           </>}
         </> : tab === 'structure' ? <><OutlineImporter project={project}/><StructurePanel project={project} documents={documents.data?.items ?? []} /></> : tab === 'generation' ? <>
           <div className="workspace-title"><div><p className="eyebrow">AGENT PIPELINE</p><h2>AI 内容创作</h2><p>使用 Planner、Outliner、Writer 或 Polisher，并将结果自动保存为文档版本。</p></div></div>
@@ -279,6 +279,45 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
       {(expand.isError||expandTask.data?.status==='FAILED')&&<p className="quality-error">{expand.error?.message||expandTask.data?.error}</p>}
       {expandTask.data?.result&&<div className="expand-preview"><div><strong>扩写预览</strong><small>{expandTask.data.result.generation.model} · {expandTask.data.result.generation.outputTokens} tokens</small></div><pre>{expandTask.data.result.generation.content}</pre><div className="dialog-actions"><button className="secondary" onClick={()=>{setExpandTaskId('');expand.mutate()}}>重新生成</button><button className="secondary" onClick={()=>{setContent(value=>value.trim()?`${value.trimEnd()}\n\n${expandTask.data!.result!.generation.content}`:expandTask.data!.result!.generation.content);setExpandOpen(false);toast.success('扩写内容已追加')}}>追加正文</button><button className="primary" onClick={()=>{setContent(expandTask.data!.result!.generation.content);setExpandOpen(false);toast.success('正文已替换')}}>替换正文</button></div></div>}
     </div></DialogContent></Dialog>
+  </div>
+}
+
+function ChapterDocumentGenerator({project,documents,modelReady,onOpenDocument}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
+  const queryClient=useQueryClient()
+  const[requirement,setRequirement]=useState('')
+  const[outline,setOutline]=useState('')
+  const[bookTitle,setBookTitle]=useState(project.name)
+  const[knowledgeQuery,setKnowledgeQuery]=useState('')
+  const[splitMode,setSplitMode]=useState<'LEAF'|'ALL'>('LEAF')
+  const[outlineTaskId,setOutlineTaskId]=useState('')
+  const[nodeIds,setNodeIds]=useState<string[]>([])
+  const[batchTaskId,setBatchTaskId]=useState('')
+  const appliedTask=useRef('')
+  const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
+  const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
+  const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。保留合理层级，补充缺失章节。\n写作需求：${requirement}`:`为《${bookTitle}》生成可直接用于批量创作的 Markdown 章节目录。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([])}})
+  useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(generated);appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
+  const confirm=useMutation({mutationFn:()=>api.importOutline(project.id,{content:outline,preview:false}),onSuccess:data=>{const nodes=data.items as Array<{id:string;parentId?:string|null}>;const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes.map(item=>item.id):nodes.filter(item=>!parents.has(item.id)).map(item=>item.id);setNodeIds(selected);queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`目录已确认，将生成 ${selected.length} 篇文档`)}})
+  const generateDocuments=useMutation({mutationFn:()=>api.batchGenerate(project.id,{nodeIds,instruction:`为《${bookTitle}》按目录逐篇生成完整正文。${requirement}`,knowledgeQuery,windowSize:2}),onSuccess:task=>setBatchTaskId(task.id)})
+  useEffect(()=>{if(batchTask.data?.status==='SUCCESS'){queryClient.invalidateQueries({queryKey:['documents',project.id]})}},[batchTask.data?.status,project.id,queryClient])
+  const running=outlineTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(outlineTask.data.status)
+  const batchRunning=batchTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(batchTask.data.status)
+  const step=batchTask.data?.status==='SUCCESS'?4:nodeIds.length?3:outline?2:1
+  return <div className="chapter-generator">
+    <div className="generator-steps">{[['1','填写需求'],['2','生成目录'],['3','修改确认'],['4','生成文档']].map(([number,label],index)=><div className={step===index+1?'active':step>index+1?'done':''} key={number}><b>{step>index+1?'✓':number}</b><span>{label}</span></div>)}</div>
+    <div className="generator-layout"><section className="generator-main-card">
+      <label><strong>第一步：写作需求</strong><textarea rows={6} value={requirement} onChange={event=>setRequirement(event.target.value)} placeholder="说明主题、目标读者、内容范围、预计篇数、写作风格和必须覆盖的问题。"/></label>
+      <button className="generator-ai-button" disabled={!requirement.trim()||generateOutline.isPending||Boolean(running)||!modelReady.includes('OUTLINE')} onClick={()=>generateOutline.mutate()}><Sparkles size={17}/>{running?`AI 正在生成目录 ${outlineTask.data?.progress??0}%`:outline?'AI 扩写并优化目录':'AI 生成目录初稿'}</button>
+      {!modelReady.includes('OUTLINE')&&<p className="generator-hint error">尚未配置 OUTLINE 模型，请先配置并重启 API。</p>}
+      {(generateOutline.isError||outlineTask.data?.status==='FAILED')&&<p className="quality-error">{generateOutline.error?.message||outlineTask.data?.error}</p>}
+      <div className="outline-editor-head"><strong>第二步：目录 Markdown</strong><span>{outline&&'AI 生成后可继续手动编辑'}</span><button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([])}}>清空目录</button></div>
+      <textarea className="outline-markdown-editor" rows={14} value={outline} onChange={event=>{setOutline(event.target.value);setNodeIds([])}} placeholder={'# 第一部分\n## 第一章\n### 第一节'}/>
+    </section><aside className="generator-side">
+      <section><h3>输出设置</h3><label>书名或文档集名称<Input value={bookTitle} onChange={event=>setBookTitle(event.target.value)}/></label><label>拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([])}}><option value="LEAF">每个末级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：生成时引用项目知识库"/></label></section>
+      <section><h3>第三步：修改并确认目录</h3><p>确认会把 Markdown 目录写入项目内容树，然后选择需要生成正文的章节。</p><button className="secondary confirm-outline" disabled={!outline.trim()||confirm.isPending||nodeIds.length>0} onClick={()=>confirm.mutate()}>{nodeIds.length?`已确认 ${nodeIds.length} 篇`:(confirm.isPending?'正在确认…':'确认目录')}</button>{confirm.isError&&<p className="quality-error">{confirm.error.message}</p>}</section>
+      <section><h3>第四步：生成文档</h3><p>AI 将按目录逐篇生成内容，并自动保存为项目文档初始版本。</p><button className="primary generate-documents" disabled={!nodeIds.length||generateDocuments.isPending||Boolean(batchRunning)||!modelReady.includes('WRITE')} onClick={()=>generateDocuments.mutate()}>{batchRunning?`正在生成 ${batchTask.data?.progress??0}%`:`生成 ${nodeIds.length||0} 篇文档`}</button>{(generateDocuments.isError||batchTask.data?.status==='FAILED')&&<p className="quality-error">{generateDocuments.error?.message||batchTask.data?.error}</p>}</section>
+      {batchTask.data?.status==='SUCCESS'&&<section className="generator-success"><strong>文档生成完成</strong><p>已保存到文档工作区，可继续编辑、扩写和管理版本。</p>{documents.slice(0,3).map(item=><button key={item.id} onClick={()=>onOpenDocument(item)}>{item.title}<ArrowRight size={13}/></button>)}</section>}
+    </aside></div>
   </div>
 }
 
