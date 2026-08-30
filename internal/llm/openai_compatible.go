@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -94,7 +95,16 @@ func (p *OpenAICompatible) Generate(ctx context.Context, input GenerateRequest) 
 	if len(decoded.Choices) == 0 {
 		return GenerateResponse{}, errors.New("LLM response contains no choices")
 	}
-	return GenerateResponse{Content: decoded.Choices[0].Message.Content, InputTokens: decoded.Usage.PromptTokens, OutputTokens: decoded.Usage.CompletionTokens, RequestID: decoded.ID}, nil
+	return GenerateResponse{Content: stripReasoning(decoded.Choices[0].Message.Content), InputTokens: decoded.Usage.PromptTokens, OutputTokens: decoded.Usage.CompletionTokens, RequestID: decoded.ID}, nil
+}
+
+var reasoningBlock = regexp.MustCompile(`(?is)<think\b[^>]*>.*?</think\s*>`)
+var reasoningTag = regexp.MustCompile(`(?is)</?think\b[^>]*>`)
+
+func stripReasoning(content string) string {
+	content = reasoningBlock.ReplaceAllString(content, "")
+	content = reasoningTag.ReplaceAllString(content, "")
+	return strings.TrimSpace(content)
 }
 
 func (p *OpenAICompatible) HealthCheck(ctx context.Context) error {

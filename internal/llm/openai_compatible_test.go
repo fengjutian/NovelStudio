@@ -23,7 +23,7 @@ func TestOpenAICompatibleGenerate(t *testing.T) {
 			t.Fatal("structured response format is missing")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"req-1","choices":[{"message":{"role":"assistant","content":"{\"score\":92}"}}],"usage":{"prompt_tokens":10,"completion_tokens":4}}`))
+		_, _ = w.Write([]byte(`{"id":"req-1","choices":[{"message":{"role":"assistant","content":"<think>internal reasoning</think>\n{\"score\":92}"}}],"usage":{"prompt_tokens":10,"completion_tokens":4}}`))
 	}))
 	defer server.Close()
 	provider, err := llm.NewOpenAICompatible(llm.OpenAICompatibleConfig{BaseURL: server.URL + "/v1", APIKey: "secret"})
@@ -36,5 +36,8 @@ func TestOpenAICompatibleGenerate(t *testing.T) {
 	}
 	if result.RequestID != "req-1" || result.InputTokens != 10 {
 		t.Fatalf("unexpected response: %#v", result)
+	}
+	if result.Content != `{"score":92}` {
+		t.Fatalf("reasoning content was not removed: %q", result.Content)
 	}
 }

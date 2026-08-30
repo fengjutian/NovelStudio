@@ -15,6 +15,11 @@ type WorkspaceTab = 'documents' | 'structure' | 'generation' | 'knowledge' | 'me
 
 const fallbackTypes:Record<string,{name:string;icon:string;accent:string}>={NOVEL:{name:'小说',icon:'文',accent:'amber'},MOVIE_COMMENTARY:{name:'电影解说',icon:'映',accent:'blue'},TECHNICAL_DOCUMENT:{name:'技术文档',icon:'术',accent:'green'}}
 const typeDisplay=(code:string,items:ContentType[]=[])=>items.find(item=>item.code===code)??fallbackTypes[code]??{name:code,icon:code.slice(0,1),accent:'amber'}
+const normalizeGeneratedOutline=(content:string)=>{
+  const cleaned=content.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi,'').replace(/<\/?think\b[^>]*>/gi,'').replace(/^```(?:markdown)?\s*|\s*```$/gim,'').trim()
+  const headings=cleaned.split(/\r?\n/).map(line=>line.trim()).filter(line=>/^#{1,6}\s+\S/.test(line))
+  return headings.length?headings.join('\n'):cleaned
+}
 
 export function App() {
   const queryClient = useQueryClient()
@@ -313,7 +318,7 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。保留合理层级，补充缺失章节。\n写作需求：${requirement}`:`为《${bookTitle}》生成可直接用于批量创作的 Markdown 章节目录。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([])}})
-  useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(generated);appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
+  useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(normalizeGeneratedOutline(generated));appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
   const confirm=useMutation({mutationFn:()=>api.importOutline(project.id,{content:outline,preview:false}),onSuccess:data=>{const nodes=data.items as Array<{id:string;parentId?:string|null}>;const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes.map(item=>item.id):nodes.filter(item=>!parents.has(item.id)).map(item=>item.id);setNodeIds(selected);queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`目录已确认，将生成 ${selected.length} 篇文档`)}})
   const generateDocuments=useMutation({mutationFn:()=>api.batchGenerate(project.id,{nodeIds,instruction:`为《${bookTitle}》按目录逐篇生成完整正文。${requirement}`,knowledgeQuery,windowSize:2}),onSuccess:task=>setBatchTaskId(task.id)})
   useEffect(()=>{if(batchTask.data?.status==='SUCCESS'){queryClient.invalidateQueries({queryKey:['documents',project.id]})}},[batchTask.data?.status,project.id,queryClient])
