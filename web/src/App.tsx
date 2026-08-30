@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {ArrowLeft,ArrowRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Plus,Search,Trash2,Upload} from 'lucide-react'
+import {ArrowLeft,ArrowRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Pencil,Plus,Shapes,Search,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {Button} from './components/ui/button'
@@ -9,15 +9,12 @@ import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '.
 import {Input} from './components/ui/input'
 import {Select} from './components/ui/select'
 import type { ProjectType } from './types'
-import type { Document, GenerationResult, KnowledgeFile, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
+import type { ContentType, Document, GenerationResult, KnowledgeFile, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
 
 type WorkspaceTab = 'documents' | 'structure' | 'generation' | 'knowledge' | 'memory' | 'quality' | 'runs'
 
-const typeInfo: Record<ProjectType, { label: string; icon: string; accent: string }> = {
-  NOVEL: { label: '小说', icon: '文', accent: 'amber' },
-  MOVIE_COMMENTARY: { label: '电影解说', icon: '映', accent: 'blue' },
-  TECHNICAL_DOCUMENT: { label: '技术文档', icon: '术', accent: 'green' },
-}
+const fallbackTypes:Record<string,{name:string;icon:string;accent:string}>={NOVEL:{name:'小说',icon:'文',accent:'amber'},MOVIE_COMMENTARY:{name:'电影解说',icon:'映',accent:'blue'},TECHNICAL_DOCUMENT:{name:'技术文档',icon:'术',accent:'green'}}
+const typeDisplay=(code:string,items:ContentType[]=[])=>items.find(item=>item.code===code)??fallbackTypes[code]??{name:code,icon:code.slice(0,1),accent:'amber'}
 
 export function App() {
   const queryClient = useQueryClient()
@@ -27,9 +24,11 @@ export function App() {
   const [type, setType] = useState<ProjectType>('NOVEL')
   const [selected, setSelected] = useState<Project | null>(null)
   const [selectedTab, setSelectedTab] = useState<WorkspaceTab>('documents')
-  const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'tasks' | 'models'>('projects')
+  const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'types' | 'tasks' | 'models'>('projects')
   const [projectQuery, setProjectQuery] = useState('')
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
+  const contentTypes=useQuery({queryKey:['content-types'],queryFn:api.contentTypes})
+  useEffect(()=>{if(contentTypes.data?.items.length&&!contentTypes.data.items.some(item=>item.code===type))setType(contentTypes.data.items[0].code)},[contentTypes.data,type])
   const dashboard=useQuery({queryKey:['dashboard-stats'],queryFn:api.dashboardStats,refetchInterval:10000})
   const create = useMutation({
     mutationFn: api.createProject,
@@ -54,6 +53,7 @@ export function App() {
         <nav>
           <a className={activeNav === 'projects' ? 'active' : ''} href="#projects" onClick={(event) => { event.preventDefault(); setActiveNav('projects') }}><Home/>项目</a>
           <a className={activeNav === 'knowledge' ? 'active' : ''} href="#knowledge" onClick={(event) => { event.preventDefault(); setActiveNav('knowledge') }}><Database/>知识库</a>
+          <a className={activeNav === 'types' ? 'active' : ''} href="#types" onClick={(event) => { event.preventDefault(); setActiveNav('types') }}><Shapes/>内容类型</a>
           <a className={activeNav === 'tasks' ? 'active' : ''} href="#tasks" onClick={(event) => { event.preventDefault(); setActiveNav('tasks') }}><Clock3/>任务中心</a>
           <a className={activeNav === 'models' ? 'active' : ''} href="#models" onClick={(event) => { event.preventDefault(); setActiveNav('models') }}><CircleGauge/>模型与校验</a>
         </nav>
@@ -82,40 +82,40 @@ export function App() {
         {projects.isLoading && <div className="empty">正在加载项目…</div>}
         {projects.isError && <div className="empty error">{projects.error.message}</div>}
         <section className="grid">
-          {projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeInfo[project.type].label}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((project) => {
-            const info = typeInfo[project.type]
+          {projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeDisplay(project.type,contentTypes.data?.items).name}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).map((project) => {
+            const info = typeDisplay(project.type,contentTypes.data?.items)
             return <article className="project-card" key={project.id} onClick={() => { setSelectedTab('documents'); setSelected(project) }}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
-              <div className="project-top"><span>{info.label}</span><button aria-label="项目菜单"><MoreHorizontal size={16}/></button></div>
+              <div className="project-top"><span>{info.name}</span><button aria-label="项目菜单"><MoreHorizontal size={16}/></button></div>
               <h3>{project.name}</h3>
               <p>{project.description || '尚未添加项目描述'}</p>
               <div className="progress"><i style={{ width: project.status === 'DRAFT' ? '18%' : '60%' }} /></div>
               <footer><span>{project.status === 'DRAFT' ? '草稿' : project.status}</span><time>{new Date(project.updatedAt).toLocaleDateString('zh-CN')}</time></footer>
             </article>
           })}
-          {projectQuery && projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeInfo[project.type].label}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).length===0&&<p className="empty-line">没有匹配的项目</p>}
+          {projectQuery && projects.data?.items.filter(project=>`${project.name} ${project.description} ${typeDisplay(project.type,contentTypes.data?.items).name}`.toLowerCase().includes(projectQuery.trim().toLowerCase())).length===0&&<p className="empty-line">没有匹配的项目</p>}
           <button className="new-card" onClick={() => setOpen(true)}><Plus/><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
         </section>
-        </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} onOpen={(project, tab) => { setSelectedTab(tab); setSelected(project) }} />}
+        </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} />}
       </main>
 
       <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dialog"><form onSubmit={submit}>
           <DialogHeader className="dialog-head"><div><p className="eyebrow">NEW PROJECT</p><DialogTitle>创建内容项目</DialogTitle><DialogDescription>选择内容类型并填写项目目标。</DialogDescription></div></DialogHeader>
           <label>项目名称<Input autoFocus required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：产品 API 使用指南" /></label>
           <fieldset><legend>内容类型</legend><div className="type-grid">
-            {(Object.keys(typeInfo) as ProjectType[]).map((value) => <button className={type === value ? 'selected' : ''} type="button" key={value} onClick={() => setType(value)}><b>{typeInfo[value].icon}</b><span>{typeInfo[value].label}</span></button>)}
+            {contentTypes.data?.items.map((item) => <button className={type === item.code ? 'selected' : ''} type="button" key={item.code} onClick={() => setType(item.code)}><b>{item.icon}</b><span>{item.name}</span></button>)}
           </div></fieldset>
           <label>创作说明<textarea rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="描述目标、受众和内容要求…" /></label>
           {create.isError && <p className="form-error">{create.error.message}</p>}
           <div className="dialog-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>取消</button><button className="primary" disabled={create.isPending}>{create.isPending ? '创建中…' : '创建项目'}</button></div>
         </form></DialogContent></Dialog>
-      {selected && <Workspace project={selected} initialTab={selectedTab} onClose={() => setSelected(null)} />}
+      {selected && <Workspace project={selected} contentTypes={contentTypes.data?.items??[]} initialTab={selectedTab} onClose={() => setSelected(null)} />}
       <Toaster richColors position="top-right"/>
     </div>
   )
 }
 
-function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 'models'; projects: Project[]; onOpen: (project: Project, tab: WorkspaceTab) => void }) {
+function GlobalPage({ page, projects }: { page: 'knowledge' | 'types' | 'tasks' | 'models'; projects: Project[] }) {
   const queryClient = useQueryClient()
   const [taskFilter,setTaskFilter]=useState('ALL')
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: api.tasks, enabled: page === 'tasks', refetchInterval: page === 'tasks' ? 2000 : false })
@@ -125,6 +125,8 @@ function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 
   if (page === 'knowledge') return <>
     <KnowledgeFileManager projects={projects}/>
   </>
+
+  if(page==='types')return <ContentTypeManager/>
 
   if (page === 'tasks') return <>
     <header><div><p className="eyebrow">TASK CENTER</p><h1>任务中心</h1><p>查看后台生成、校验和处理任务的实时状态。</p></div></header>
@@ -136,7 +138,44 @@ function GlobalPage({ page, projects, onOpen }: { page: 'knowledge' | 'tasks' | 
     <section className="metrics model-metrics"><article><span>配置状态</span><strong className="text-value">{models.data?.configured ? '已就绪' : '未配置'}</strong><small>OpenAI-Compatible Provider</small></article><article><span>Validator</span><strong>{models.data?.validatorCount ?? 0}</strong><small>并行独立校验模型</small></article><article><span>Judge</span><strong className="text-value">{models.data?.judgeConfigured ? '已配置' : '未配置'}</strong><small>只处理重大模型分歧</small></article></section>
     {!models.data?.configured && <div className="setup-callout"><strong>需要配置模型环境变量</strong><code>LLM_BASE_URL · LLM_API_KEY · VALIDATOR_MODELS · JUDGE_MODEL</code><span>设置后重启 Go API。</span></div>}
     <ModelConfigPanel/>
-    <section className="global-panel"><div className="section-head"><div><h2>项目校验</h2><p>选择项目，使用它自己的知识库作为证据</p></div></div><div className="global-list">{projects.map((project) => <button key={project.id} onClick={() => onOpen(project, 'quality')}><span className={`project-icon ${typeInfo[project.type].accent}`}>{typeInfo[project.type].icon}</span><div><strong>{project.name}</strong><small>{typeInfo[project.type].label}</small></div><b>打开校验 →</b></button>)}</div></section>
+  </>
+}
+
+function ContentTypeManager(){
+  const queryClient=useQueryClient()
+  const types=useQuery({queryKey:['content-types'],queryFn:api.contentTypes})
+  const[editing,setEditing]=useState<ContentType|null>(null)
+  const[open,setOpen]=useState(false)
+  const[code,setCode]=useState('')
+  const[name,setName]=useState('')
+  const[icon,setIcon]=useState('')
+  const[accent,setAccent]=useState('amber')
+  const[description,setDescription]=useState('')
+  const reset=(item?:ContentType)=>{setEditing(item??null);setCode(item?.code??'');setName(item?.name??'');setIcon(item?.icon??'');setAccent(item?.accent??'amber');setDescription(item?.description??'');setOpen(true)}
+  const save=useMutation({mutationFn:()=>editing?api.updateContentType(editing.code,{name,icon,accent,description}):api.createContentType({code,name,icon,accent,description}),onSuccess:()=>{toast.success(editing?'内容类型已更新':'内容类型已创建');setOpen(false);queryClient.invalidateQueries({queryKey:['content-types']});queryClient.invalidateQueries({queryKey:['projects']})}})
+  const remove=useMutation({mutationFn:api.deleteContentType,onSuccess:()=>{toast.success('内容类型已删除');queryClient.invalidateQueries({queryKey:['content-types']})},onError:error=>toast.error(error.message)})
+  const submit=(event:FormEvent)=>{event.preventDefault();save.mutate()}
+  return <>
+    <header><div><p className="eyebrow">CONTENT TYPES</p><h1>内容类型</h1><p>维护项目可选择的内容类型、显示名称和视觉标识，不再由程序写死。</p></div><Button className="primary" onClick={()=>reset()}><Plus size={16}/>新增类型</Button></header>
+    <section className="type-manager-head"><div><strong>{types.data?.total??0}</strong><span>个可用类型</span></div><p>类型编码用于提示词和数据关联，创建后不可修改；名称、图标、配色和说明可以随时编辑。</p></section>
+    <section className="content-type-grid">
+      {types.data?.items.map(item=><article key={item.code}>
+        <div className={`project-icon ${item.accent}`}>{item.icon}</div>
+        <div className="content-type-title"><h2>{item.name}</h2><code>{item.code}</code></div>
+        <p>{item.description||'尚未填写类型说明'}</p>
+        <footer><button onClick={()=>reset(item)}><Pencil size={14}/>编辑</button><button className="danger" disabled={remove.isPending} onClick={()=>window.confirm(`确定删除“${item.name}”？已被项目使用时将无法删除。`)&&remove.mutate(item.code)}><Trash2 size={14}/>删除</button></footer>
+      </article>)}
+      {!types.isLoading&&types.data?.total===0&&<div className="file-empty"><Shapes/><strong>暂无内容类型</strong><span>新增一个类型后即可创建项目</span></div>}
+    </section>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dialog content-type-dialog"><form onSubmit={submit}>
+      <DialogHeader><DialogTitle>{editing?'编辑内容类型':'新增内容类型'}</DialogTitle><DialogDescription>配置新建项目时显示的类型信息。</DialogDescription></DialogHeader>
+      <div className="type-form-row"><label>类型名称<Input required maxLength={80} value={name} onChange={event=>setName(event.target.value)} placeholder="例如：营销文案"/></label><label>图标文字<Input maxLength={4} value={icon} onChange={event=>setIcon(event.target.value)} placeholder="例如：营"/></label></div>
+      <label>类型编码<Input required disabled={!!editing} maxLength={40} value={code} onChange={event=>setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,''))} placeholder="例如：MARKETING_COPY"/></label>
+      <label>配色<Select value={accent} onChange={event=>setAccent(event.target.value)}><option value="amber">琥珀色</option><option value="blue">蓝色</option><option value="green">绿色</option><option value="rose">玫红色</option><option value="violet">紫色</option></Select></label>
+      <label>类型说明<textarea rows={3} maxLength={500} value={description} onChange={event=>setDescription(event.target.value)} placeholder="说明适用的内容场景"/></label>
+      {save.isError&&<p className="form-error">{save.error.message}</p>}
+      <div className="dialog-actions"><button type="button" className="secondary" onClick={()=>setOpen(false)}>取消</button><button className="primary" disabled={save.isPending}>{save.isPending?'保存中…':'保存'}</button></div>
+    </form></DialogContent></Dialog>
   </>
 }
 
@@ -145,7 +184,7 @@ function KnowledgeFileManager({projects}:{projects:Project[]}){const queryClient
 type ProviderDraft={baseUrl:string;model:string;apiKey:string;enabled:boolean;clearApiKey:boolean;hasApiKey:boolean}
 function ModelConfigPanel(){const queryClient=useQueryClient();const config=useQuery({queryKey:['local-model-config'],queryFn:api.localModelConfig});const[active,setActive]=useState<'deepseek'|'minimax'>('deepseek');const[deepseek,setDeepSeek]=useState<ProviderDraft>({baseUrl:'https://api.deepseek.com',model:'deepseek-v4-flash',apiKey:'',enabled:false,clearApiKey:false,hasApiKey:false});const[minimax,setMiniMax]=useState<ProviderDraft>({baseUrl:'https://api.minimaxi.com/v1',model:'MiniMax-M2.7',apiKey:'',enabled:false,clearApiKey:false,hasApiKey:false});useEffect(()=>{const value=config.data;if(!value)return;setActive(value.activeProvider);setDeepSeek({...value.deepseek,apiKey:'',clearApiKey:false});setMiniMax({...value.minimax,apiKey:'',clearApiKey:false})},[config.data]);const save=useMutation({mutationFn:()=>api.saveLocalModelConfig({activeProvider:active,deepseek, minimax}),onSuccess:()=>{toast.success('配置已保存，请重启 Go API 生效');queryClient.invalidateQueries({queryKey:['local-model-config']})}});const providerCard=(id:'deepseek'|'minimax',label:string,draft:ProviderDraft,setDraft:(value:ProviderDraft)=>void,models:string[])=><article className={`provider-config ${active===id?'active':''}`}><header><div><span className="provider-mark">{id==='deepseek'?'DS':'MM'}</span><div><h3>{label}</h3><small>{draft.hasApiKey?'API Key 已安全保存在本机':'尚未设置 API Key'}</small></div></div><label className="provider-switch"><input type="radio" name="activeProvider" checked={active===id} onChange={()=>setActive(id)}/> 设为当前 Provider</label></header><label>Base URL<Input value={draft.baseUrl} onChange={event=>setDraft({...draft,baseUrl:event.target.value})}/></label><label>模型<Select value={draft.model} onChange={event=>setDraft({...draft,model:event.target.value})}>{models.map(model=><option value={model} key={model}>{model}</option>)}</Select></label><label>API Key<Input type="password" autoComplete="new-password" value={draft.apiKey} onChange={event=>setDraft({...draft,apiKey:event.target.value,clearApiKey:false})} placeholder={draft.hasApiKey?'留空则保留现有 Key':'输入 API Key'}/></label><div className="provider-options"><label><input type="checkbox" checked={draft.enabled} onChange={event=>setDraft({...draft,enabled:event.target.checked})}/> 启用</label>{draft.hasApiKey&&<label><input type="checkbox" checked={draft.clearApiKey} onChange={event=>setDraft({...draft,clearApiKey:event.target.checked,apiKey:''})}/> 清除本地 Key</label>}</div></article>;return <section className="model-config-panel"><div className="section-head"><div><p className="eyebrow">LOCAL PROVIDERS</p><h2>本地模型配置</h2><p>Key 仅写入 <code>{config.data?.path??'.local/model-config.json'}</code>，不会保存到数据库或返回明文。</p></div><Button disabled={save.isPending||config.isLoading} onClick={()=>save.mutate()}>{save.isPending?'保存中…':'保存配置'}</Button></div><div className="provider-grid">{providerCard('deepseek','DeepSeek',deepseek,setDeepSeek,['deepseek-v4-flash','deepseek-v4-pro'])}{providerCard('minimax','MiniMax',minimax,setMiniMax,['MiniMax-M2.7','MiniMax-M2.7-highspeed','MiniMax-M2.5'])}</div>{save.isError&&<p className="quality-error">{save.error.message}</p>}<div className="local-security-note"><Database size={15}/><span>配置保存后需重启 Go API；页面永远不会回显 API Key。</span></div></section>}
 
-function Workspace({ project, initialTab, onClose }: { project: Project; initialTab: WorkspaceTab; onClose: () => void }) {
+function Workspace({ project, contentTypes, initialTab, onClose }: { project: Project; contentTypes:ContentType[]; initialTab: WorkspaceTab; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<WorkspaceTab>(initialTab)
   const [title, setTitle] = useState('')
@@ -185,7 +224,7 @@ function Workspace({ project, initialTab, onClose }: { project: Project; initial
   const validationResult = activeTask.data?.result
 
   return <div className="workspace-layer">
-    <div className="workspace-bar"><button onClick={onClose}><ArrowLeft size={14}/> 返回项目</button><div><small>{typeInfo[project.type].label}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}><Download size={14}/> 导出 Markdown</a><span>草稿工作区</span></div>
+    <div className="workspace-bar"><button onClick={onClose}><ArrowLeft size={14}/> 返回项目</button><div><small>{typeDisplay(project.type,contentTypes).name}</small><strong>{project.name}</strong></div><a className="export-link" href={api.exportURL(project.id)}><Download size={14}/> 导出 Markdown</a><span>草稿工作区</span></div>
     <div className="workspace-body">
       <aside className="workspace-nav"><button className={tab === 'documents' ? 'selected' : ''} onClick={() => setTab('documents')}>文档与版本</button><button className={tab === 'structure' ? 'selected' : ''} onClick={() => setTab('structure')}>内容结构</button><button className={tab === 'generation' ? 'selected' : ''} onClick={() => setTab('generation')}>AI 创作</button><button className={tab === 'knowledge' ? 'selected' : ''} onClick={() => setTab('knowledge')}>知识库</button><button className={tab === 'memory' ? 'selected' : ''} onClick={() => setTab('memory')}>Story Memory</button><button className={tab === 'quality' ? 'selected' : ''} onClick={() => setTab('quality')}>多模型校验</button><button className={tab === 'runs' ? 'selected' : ''} onClick={() => setTab('runs')}>AI 运行记录</button><div className="pipeline"><small>准确性流水线</small><p>资料检索</p><i /><p>模型生成</p><i /><p>双模型校验</p><i /><p>质量门禁</p></div></aside>
       <section className="workspace-content">

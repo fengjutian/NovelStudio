@@ -1,0 +1,17 @@
+CREATE TABLE IF NOT EXISTS content_types (
+    code VARCHAR(40) PRIMARY KEY,
+    name VARCHAR(80) NOT NULL,
+    icon VARCHAR(12) NOT NULL,
+    accent VARCHAR(24) NOT NULL DEFAULT 'amber',
+    description VARCHAR(500) NOT NULL DEFAULT '',
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT IGNORE INTO content_types(code,name,icon,accent,description,created_at,updated_at) VALUES
+('NOVEL','小说','文','amber','小说与长篇叙事',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)),
+('MOVIE_COMMENTARY','电影解说','映','blue','电影、剧集解说稿',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)),
+('TECHNICAL_DOCUMENT','技术文档','术','green','产品与技术资料',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6));
+
+ALTER TABLE projects MODIFY COLUMN project_type VARCHAR(40) NOT NULL;
+ALTER TABLE projects ADD CONSTRAINT fk_projects_content_type FOREIGN KEY(project_type) REFERENCES content_types(code);

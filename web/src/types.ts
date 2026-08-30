@@ -1,4 +1,14 @@
-export type ProjectType = 'NOVEL' | 'MOVIE_COMMENTARY' | 'TECHNICAL_DOCUMENT'
+export type ProjectType = string
+
+export interface ContentType {
+  code: ProjectType
+  name: string
+  icon: string
+  accent: string
+  description: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface Project {
   id: string

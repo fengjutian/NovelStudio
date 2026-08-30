@@ -11,7 +11,32 @@ const (
 )
 
 func (t Type) Valid() bool {
-	return t == TypeNovel || t == TypeMovieCommentary || t == TypeTechnicalDocument
+	return t != ""
+}
+
+type ContentType struct {
+	Code        Type      `json:"code"`
+	Name        string    `json:"name"`
+	Icon        string    `json:"icon"`
+	Accent      string    `json:"accent"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type CreateContentTypeInput struct {
+	Code        Type   `json:"code"`
+	Name        string `json:"name"`
+	Icon        string `json:"icon"`
+	Accent      string `json:"accent"`
+	Description string `json:"description"`
+}
+
+type UpdateContentTypeInput struct {
+	Name        string `json:"name"`
+	Icon        string `json:"icon"`
+	Accent      string `json:"accent"`
+	Description string `json:"description"`
 }
 
 type Project struct {

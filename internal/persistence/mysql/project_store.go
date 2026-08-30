@@ -113,7 +113,11 @@ func (s ProjectStore) Create(ctx context.Context, input project.CreateInput) (pr
 	if input.Name == "" {
 		return project.Project{}, errors.New("name is required")
 	}
-	if !input.Type.Valid() {
+	var typeCount int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM content_types WHERE code=?`, input.Type).Scan(&typeCount); err != nil {
+		return project.Project{}, err
+	}
+	if typeCount == 0 {
 		return project.Project{}, errors.New("unsupported project type")
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -143,6 +147,70 @@ func (s ProjectStore) Create(ctx context.Context, input project.CreateInput) (pr
 		return project.Project{}, err
 	}
 	return item, nil
+}
+
+func (s ProjectStore) ListContentTypes(ctx context.Context) ([]project.ContentType, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT code,name,icon,accent,description,created_at,updated_at FROM content_types ORDER BY created_at,code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []project.ContentType{}
+	for rows.Next() {
+		var item project.ContentType
+		if err := rows.Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s ProjectStore) CreateContentType(ctx context.Context, input project.CreateContentTypeInput) (project.ContentType, error) {
+	item, err := project.NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description)
+	if err != nil {
+		return project.ContentType{}, err
+	}
+	now := time.Now().UTC()
+	item.CreatedAt, item.UpdatedAt = now, now
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO content_types(code,name,icon,accent,description,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, item.Code, item.Name, item.Icon, item.Accent, item.Description, now, now)
+	return item, err
+}
+
+func (s ProjectStore) UpdateContentType(ctx context.Context, code project.Type, input project.UpdateContentTypeInput) (project.ContentType, error) {
+	item, err := project.NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description)
+	if err != nil {
+		return project.ContentType{}, err
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE content_types SET name=?,icon=?,accent=?,description=?,updated_at=? WHERE code=?`, item.Name, item.Icon, item.Accent, item.Description, time.Now().UTC(), code)
+	if err != nil {
+		return project.ContentType{}, err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return project.ContentType{}, project.ErrContentTypeNotFound
+	}
+	err = s.DB.QueryRowContext(ctx, `SELECT code,name,icon,accent,description,created_at,updated_at FROM content_types WHERE code=?`, code).Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+func (s ProjectStore) DeleteContentType(ctx context.Context, code project.Type) error {
+	var used int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE project_type=? AND deleted_at IS NULL`, code).Scan(&used); err != nil {
+		return err
+	}
+	if used > 0 {
+		return project.ErrContentTypeInUse
+	}
+	result, err := s.DB.ExecContext(ctx, `DELETE FROM content_types WHERE code=?`, code)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return project.ErrContentTypeNotFound
+	}
+	return nil
 }
 
 func (s ProjectStore) Delete(ctx context.Context, id string) error {

@@ -71,6 +71,9 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
+	mux.HandleFunc("POST /api/v1/project-types", a.createProjectType)
+	mux.HandleFunc("PUT /api/v1/project-types/{code}", a.updateProjectType)
+	mux.HandleFunc("DELETE /api/v1/project-types/{code}", a.deleteProjectType)
 	mux.HandleFunc("GET /api/v1/projects", a.listProjects)
 	mux.HandleFunc("GET /api/v1/dashboard/stats", a.dashboardStats)
 	mux.HandleFunc("POST /api/v1/projects", a.createProject)
@@ -989,12 +992,60 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "ai-content-studio"})
 }
 
-func (a *API) projectTypes(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, []map[string]string{
-		{"value": string(project.TypeNovel), "label": "小说"},
-		{"value": string(project.TypeMovieCommentary), "label": "电影解说"},
-		{"value": string(project.TypeTechnicalDocument), "label": "技术文档"},
-	})
+func (a *API) projectTypes(w http.ResponseWriter, r *http.Request) {
+	items, err := a.store.ListContentTypes(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) createProjectType(w http.ResponseWriter, r *http.Request) {
+	var input project.CreateContentTypeInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.store.CreateContentType(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (a *API) updateProjectType(w http.ResponseWriter, r *http.Request) {
+	var input project.UpdateContentTypeInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.store.UpdateContentType(r.Context(), project.Type(r.PathValue("code")), input)
+	if errors.Is(err, project.ErrContentTypeNotFound) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) deleteProjectType(w http.ResponseWriter, r *http.Request) {
+	err := a.store.DeleteContentType(r.Context(), project.Type(r.PathValue("code")))
+	if errors.Is(err, project.ErrContentTypeInUse) {
+		writeError(w, http.StatusConflict, "CONTENT_TYPE_IN_USE", "已有项目正在使用该内容类型")
+		return
+	}
+	if errors.Is(err, project.ErrContentTypeNotFound) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) listProjects(w http.ResponseWriter, r *http.Request) {
