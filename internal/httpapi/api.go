@@ -115,6 +115,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validation-tasks", a.createValidationTask)
 	mux.HandleFunc("POST /api/v1/projects/{id}/generation-tasks", a.createGenerationTask)
+	mux.HandleFunc("POST /api/v1/projects/{id}/scaffolder/chat/completions", a.scaffolderChat)
 	mux.HandleFunc("POST /api/v1/projects/{id}/quality-generation-tasks", a.createQualityGenerationTask)
 	mux.HandleFunc("POST /api/v1/projects/{id}/batch-generation-tasks", a.createBatchGenerationTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
@@ -122,6 +123,45 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/tasks/{id}/retry", a.retryTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
 	return recoverer(logger, requestLogger(logger, cors(mux)))
+}
+
+func (a *API) scaffolderChat(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "generation model is not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	parts := make([]string, 0, len(input.Messages))
+	for _, message := range input.Messages {
+		if strings.TrimSpace(message.Content) != "" {
+			parts = append(parts, message.Role+":\n"+message.Content)
+		}
+	}
+	instruction := strings.Join(parts, "\n\n")
+	operation := generation.OperationWrite
+	lower := strings.ToLower(instruction)
+	if strings.Contains(lower, "outline") || strings.Contains(instruction, "目录") || strings.Contains(instruction, "大纲") {
+		operation = generation.OperationOutline
+	}
+	result, err := a.generator.Generate(r.Context(), generation.Request{Operation: operation, ProjectType: string(projectItem.Type), Instruction: instruction, ProjectID: projectItem.ID})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "GENERATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": result.Content}, "finish_reason": "stop"}}})
 }
 
 var htmlTags = regexp.MustCompile(`<[^>]+>`)

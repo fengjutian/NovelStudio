@@ -4,6 +4,7 @@ import { api } from './api'
 import {ArrowLeft,ArrowRight,BookOpen,Check,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
+import {DatabaseOutlineScaffolder} from './components/DatabaseOutlineScaffolder'
 import {Button} from './components/ui/button'
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from './components/ui/dialog'
 import {Input} from './components/ui/input'
@@ -282,7 +283,11 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   </div>
 }
 
-function ChapterDocumentGenerator({project,documents,modelReady,onOpenDocument}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
+function ChapterDocumentGenerator({project}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
+  return <DatabaseOutlineScaffolder project={project}/>
+}
+
+function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocument}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
   const queryClient=useQueryClient()
   const[requirement,setRequirement]=useState('')
   const[outline,setOutline]=useState('')
