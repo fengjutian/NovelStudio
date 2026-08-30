@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {ArrowLeft,ArrowRight,BookOpen,Check,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
+import {ArrowLeft,ArrowRight,Check,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {Button} from './components/ui/button'
@@ -314,9 +314,14 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   const[outlineTaskId,setOutlineTaskId]=useState('')
   const[nodeIds,setNodeIds]=useState<string[]>([])
   const[batchTaskId,setBatchTaskId]=useState('')
+  const[assistOpen,setAssistOpen]=useState(false)
+  const[assistPrompt,setAssistPrompt]=useState('')
+  const[assistTaskId,setAssistTaskId]=useState('')
   const appliedTask=useRef('')
   const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
+  const assistTask=useQuery({queryKey:['chapter-brief-assist-task',assistTaskId],queryFn:()=>api.task<GenerationResult>(assistTaskId),enabled:Boolean(assistTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
+  const assist=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:modelReady.includes('PLAN')?'PLAN':'OUTLINE',instruction:`根据用户的初步想法，撰写一份清晰、具体、可直接用于规划目录的创作简报。简报应包含题材与主题、目标读者、故事或内容范围、主要风格、预计篇幅和关键创作要求。只输出简报正文，不要解释。\n初步想法：${assistPrompt}`,title:`${bookTitle}创作简报`,documentId:'',knowledgeQuery,content:requirement,save:false}),onSuccess:task=>setAssistTaskId(task.id)})
   const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。保留合理层级，补充缺失章节。\n写作需求：${requirement}`:`为《${bookTitle}》生成可直接用于批量创作的 Markdown 章节目录。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([])}})
   useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(normalizeGeneratedOutline(generated));appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
   const confirm=useMutation({mutationFn:()=>api.importOutline(project.id,{content:outline,preview:false}),onSuccess:data=>{const nodes=data.items as Array<{id:string;parentId?:string|null}>;const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes.map(item=>item.id):nodes.filter(item=>!parents.has(item.id)).map(item=>item.id);setNodeIds(selected);queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`目录已确认，将生成 ${selected.length} 篇文档`)}})
@@ -324,28 +329,46 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   useEffect(()=>{if(batchTask.data?.status==='SUCCESS'){queryClient.invalidateQueries({queryKey:['documents',project.id]})}},[batchTask.data?.status,project.id,queryClient])
   const running=outlineTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(outlineTask.data.status)
   const batchRunning=batchTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(batchTask.data.status)
-  const step=batchTask.data?.status==='SUCCESS'?4:nodeIds.length?3:outline?2:1
+  const step=nodeIds.length?4:outline&&!running?3:running?2:1
   const outlineLines=outline.split('\n').filter(line=>/^#{1,6}\s+/.test(line.trim()))
   const chapterCount=outlineLines.filter(line=>/^#{2,6}\s+/.test(line.trim())).length
   const canOutline=modelReady.includes('OUTLINE')
   const canWrite=modelReady.includes('WRITE')
+  const steps=[['填写需求','描述主题与目标'],['生成目录','AI 规划章节'],['修改确认','校对目录结构'],['生成文档','批量创建正文']]
   return <div className="chapter-generator">
-    <div className="generator-steps" aria-label="章节生成进度">{[['填写需求','描述主题与目标'],['生成目录','AI 规划章节'],['修改确认','校对目录结构'],['生成文档','批量创建正文']].map(([label,description],index)=><div className={step===index+1?'active':step>index+1?'done':''} key={label}><b>{step>index+1?<Check size={14}/>:index+1}</b><span><strong>{label}</strong><small>{description}</small></span>{index<3&&<ChevronRight className="step-chevron"/>}</div>)}</div>
-    <div className="generator-layout"><section className="generator-main-card">
-      <div className="generator-section-title"><span><Sparkles/></span><div><p>创作简报</p><h3>你想写一部怎样的作品？</h3></div><small>{requirement.length} / 2000</small></div>
-      <label className="generator-requirement"><span className="sr-only">写作需求</span><textarea maxLength={2000} rows={7} value={requirement} onChange={event=>setRequirement(event.target.value)} placeholder={'描述主题、目标读者、内容范围与预计篇数。\n例如：面向悬疑小说读者，规划一部 20 章的近未来故事；节奏紧凑，每章保留一个悬念。'}/></label>
-      <button className="generator-ai-button" disabled={!requirement.trim()||generateOutline.isPending||Boolean(running)||!canOutline} onClick={()=>generateOutline.mutate()}><Sparkles size={17}/>{running?`AI 正在规划目录 · ${outlineTask.data?.progress??0}%`:outline?'重新优化目录':'生成目录初稿'}<ArrowRight size={16}/></button>
-      {running&&<div className="generator-progress"><i><b style={{width:`${outlineTask.data?.progress??0}%`}}/></i><span>正在分析创作需求并设计章节结构</span></div>}
-      {!canOutline&&<p className="generator-hint error"><CircleGauge size={13}/> 目录模型尚未配置。你仍可手动填写目录，或前往“模型与校验”完成配置。</p>}
-      {(generateOutline.isError||outlineTask.data?.status==='FAILED')&&<p className="quality-error">{generateOutline.error?.message||outlineTask.data?.error}</p>}
-      <div className="outline-editor-head"><div><strong>目录 Markdown</strong><span>{outline?'随时可以手动调整层级和标题':'也可以直接粘贴已有目录'}</span></div>{outline&&<div className="outline-stats"><span>{outlineLines.length} 个条目</span><span>{chapterCount} 个章节</span></div>}<button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([])}}>清空</button></div>
-      <textarea className="outline-markdown-editor" rows={14} value={outline} onChange={event=>{setOutline(event.target.value);setNodeIds([])}} placeholder={'# 第一部分\n## 第一章\n### 第一节'}/>
-    </section><aside className="generator-side">
-      <section className="generator-settings"><div className="side-section-title"><Settings2/><div><h3>输出设置</h3><p>决定正文如何拆分与引用资料</p></div></div><label>作品名称<Input value={bookTitle} onChange={event=>setBookTitle(event.target.value)}/></label><label>文档拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([])}}><option value="LEAF">每个末级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：人物、世界观或参考资料"/></label></section>
-      <section className={nodeIds.length?'generator-action complete':'generator-action'}><span className="action-icon"><BookOpen/></span><div><small>步骤 3</small><h3>确认目录结构</h3><p>{nodeIds.length?`目录已写入内容树，计划创建 ${nodeIds.length} 篇文档。`:'确认后会写入项目内容树，并锁定本次生成范围。'}</p></div><button className="secondary confirm-outline" disabled={!outline.trim()||confirm.isPending||nodeIds.length>0} onClick={()=>confirm.mutate()}>{nodeIds.length?<><Check size={15}/> 已确认 {nodeIds.length} 篇</>:(confirm.isPending?'正在确认…':'确认并创建计划')}</button>{confirm.isError&&<p className="quality-error">{confirm.error.message}</p>}</section>
-      <section className="generator-action final"><span className="action-icon"><FileStack/></span><div><small>步骤 4</small><h3>批量生成正文</h3><p>{!canWrite?'写作模型尚未配置，暂时无法生成正文。':nodeIds.length?`将以 2 个章节为一组依次生成，共 ${nodeIds.length} 篇。`:'确认目录后即可开始批量生成。'}</p></div>{batchRunning&&<div className="generator-progress"><i><b style={{width:`${batchTask.data?.progress??0}%`}}/></i><span>{batchTask.data?.message}</span></div>}<button className="primary generate-documents" disabled={!nodeIds.length||generateDocuments.isPending||Boolean(batchRunning)||!canWrite} onClick={()=>generateDocuments.mutate()}>{batchRunning?`正在生成 · ${batchTask.data?.progress??0}%`:`生成 ${nodeIds.length||0} 篇文档`}<ArrowRight size={15}/></button>{(generateDocuments.isError||batchTask.data?.status==='FAILED')&&<p className="quality-error">{generateDocuments.error?.message||batchTask.data?.error}</p>}</section>
+    <div className="generator-steps" aria-label="章节生成进度">{steps.map(([label,description],index)=><div className={step===index+1?'active':step>index+1?'done':''} key={label} aria-current={step===index+1?'step':undefined}><b>{step>index+1?<Check size={14}/>:index+1}</b><span><strong>{label}</strong><small>{description}</small></span>{index<3&&<ChevronRight className="step-chevron"/>}</div>)}</div>
+    <div className="generator-layout"><div className="generator-flow">
+      <section className="generator-main-card generator-flow-step" data-step="1">
+        <div className="generator-section-title"><span><Sparkles/></span><div><p>步骤 1 · 创作简报</p><h3>你想写一部怎样的作品？</h3></div><small>{requirement.length} / 2000</small></div>
+        <label className="generator-requirement"><span className="sr-only">写作需求</span><span className="generator-requirement-wrap"><textarea maxLength={2000} rows={7} value={requirement} onChange={event=>setRequirement(event.target.value)} placeholder={'描述主题、目标读者、内容范围与预计篇数。\n例如：面向悬疑小说读者，规划一部 20 章的近未来故事；节奏紧凑，每章保留一个悬念。'}/><button type="button" className="brief-assist-trigger" disabled={!modelReady.includes('PLAN')&&!modelReady.includes('OUTLINE')} onClick={()=>{setAssistPrompt(requirement);setAssistTaskId('');setAssistOpen(true)}}><Sparkles size={14}/> AI 助写</button></span></label>
+      </section>
+      <section className="generator-main-card generator-flow-step" data-step="2">
+        <div className="generator-section-title"><span><Sparkles/></span><div><p>步骤 2</p><h3>生成目录</h3></div></div>
+        <button className="generator-ai-button" disabled={!requirement.trim()||generateOutline.isPending||Boolean(running)||!canOutline} onClick={()=>generateOutline.mutate()}><Sparkles size={17}/>{running?`AI 正在规划目录 · ${outlineTask.data?.progress??0}%`:outline?'重新优化目录':'生成目录初稿'}<ArrowRight size={16}/></button>
+        {running&&<div className="generator-progress"><i><b style={{width:`${outlineTask.data?.progress??0}%`}}/></i><span>正在分析创作需求并设计章节结构</span></div>}
+        {!canOutline&&<p className="generator-hint error"><CircleGauge size={13}/> 目录模型尚未配置。你仍可手动填写目录，或前往“模型与校验”完成配置。</p>}
+        {(generateOutline.isError||outlineTask.data?.status==='FAILED')&&<p className="quality-error">{generateOutline.error?.message||outlineTask.data?.error}</p>}
+      </section>
+      <section className="generator-main-card generator-flow-step" data-step="3">
+        <div className="outline-editor-head"><div><strong>步骤 3 · 修改并确认目录</strong><span>{outline?'校对层级和标题，确认后锁定生成范围':'等待生成目录，也可以直接粘贴已有目录'}</span></div>{outline&&<div className="outline-stats"><span>{outlineLines.length} 个条目</span><span>{chapterCount} 个章节</span></div>}<button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([])}}>清空</button></div>
+        <textarea className="outline-markdown-editor" rows={14} value={outline} onChange={event=>{setOutline(event.target.value);setNodeIds([])}} placeholder={'# 第一部分\n## 第一章\n### 第一节'}/>
+        <button className="secondary confirm-outline" disabled={!outline.trim()||confirm.isPending||nodeIds.length>0} onClick={()=>confirm.mutate()}>{nodeIds.length?<><Check size={15}/> 已确认 {nodeIds.length} 篇</>:(confirm.isPending?'正在确认…':'确认目录并进入下一步')}</button>
+        {confirm.isError&&<p className="quality-error">{confirm.error.message}</p>}
+      </section>
+      <section className={nodeIds.length?'generator-main-card generator-flow-step generator-action final ready':'generator-main-card generator-flow-step generator-action final'} data-step="4">
+        <span className="action-icon"><FileStack/></span><div><small>步骤 4</small><h3>批量生成正文</h3><p>{!canWrite?'写作模型尚未配置，暂时无法生成正文。':nodeIds.length?`将以 2 个章节为一组依次生成，共 ${nodeIds.length} 篇。`:'请先确认目录，再开始批量生成。'}</p></div>{batchRunning&&<div className="generator-progress"><i><b style={{width:`${batchTask.data?.progress??0}%`}}/></i><span>{batchTask.data?.message}</span></div>}<button className="primary generate-documents" disabled={!nodeIds.length||generateDocuments.isPending||Boolean(batchRunning)||!canWrite} onClick={()=>generateDocuments.mutate()}>{batchRunning?`正在生成 · ${batchTask.data?.progress??0}%`:`生成 ${nodeIds.length||0} 篇文档`}<ArrowRight size={15}/></button>{(generateDocuments.isError||batchTask.data?.status==='FAILED')&&<p className="quality-error">{generateDocuments.error?.message||batchTask.data?.error}</p>}
+      </section>
       {batchTask.data?.status==='SUCCESS'&&<section className="generator-success"><strong>文档生成完成</strong><p>已保存到文档工作区，可继续编辑、扩写和管理版本。</p>{documents.slice(0,3).map(item=><button key={item.id} onClick={()=>onOpenDocument(item)}>{item.title}<ArrowRight size={13}/></button>)}</section>}
+    </div><aside className="generator-side">
+      <section className="generator-settings"><div className="side-section-title"><Settings2/><div><h3>输出设置</h3><p>决定正文如何拆分与引用资料</p></div></div><label>作品名称<Input value={bookTitle} onChange={event=>setBookTitle(event.target.value)}/></label><label>文档拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([])}}><option value="LEAF">每个末级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：人物、世界观或参考资料"/></label></section>
     </aside></div>
+    <Dialog open={assistOpen} onOpenChange={setAssistOpen}><DialogContent className="dialog ai-expand-dialog"><div className="ai-expand-content">
+      <DialogHeader className="content-type-dialog-head"><DialogTitle>AI 助写创作简报</DialogTitle><DialogDescription>输入一句初步想法，AI 会补全题材、受众、风格、篇幅和创作要求，确认后才会写入需求框。</DialogDescription></DialogHeader>
+      <label>你的初步想法<textarea rows={6} value={assistPrompt} onChange={event=>setAssistPrompt(event.target.value)} placeholder="例如：写一部发生在海底城市的悬疑小说，主角是一名失忆的工程师。"/></label>
+      <button className="primary expand-run" disabled={!assistPrompt.trim()||assist.isPending||assistTask.data?.status==='RUNNING'} onClick={()=>{setAssistTaskId('');assist.mutate()}}><Sparkles size={15}/>{assist.isPending||assistTask.data?.status==='RUNNING'?'正在助写…':'生成创作简报'}</button>
+      {(assist.isError||assistTask.data?.status==='FAILED')&&<p className="quality-error">{assist.error?.message||assistTask.data?.error}</p>}
+      {assistTask.data?.result&&<div className="expand-preview"><div><strong>助写结果</strong><small>{assistTask.data.result.generation.model} · {assistTask.data.result.generation.outputTokens} tokens</small></div><pre>{assistTask.data.result.generation.content}</pre><div className="dialog-actions"><button className="secondary" onClick={()=>assist.mutate()}>重新生成</button><button className="secondary" onClick={()=>{setRequirement(value=>value.trim()?`${value.trimEnd()}\n\n${assistTask.data!.result!.generation.content}`:assistTask.data!.result!.generation.content);setAssistOpen(false);toast.success('AI 简报已追加')}}>追加</button><button className="primary" onClick={()=>{setRequirement(assistTask.data!.result!.generation.content.slice(0,2000));setAssistOpen(false);toast.success('AI 简报已写入')}}>替换需求</button></div></div>}
+    </div></DialogContent></Dialog>
   </div>
 }
 
