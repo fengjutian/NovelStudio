@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {ArrowLeft,ArrowRight,Check,ChevronLeft,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
+import {ArrowLeft,ArrowRight,Bell,Check,ChevronDown,ChevronLeft,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {MarkdownPreview} from './components/MarkdownPreview'
@@ -62,6 +62,8 @@ export function App() {
     create.mutate({ name, type, description })
   }
 
+  const navLabels={projects:'项目',knowledge:'知识库',types:'内容类型',tasks:'任务中心',models:'模型与校验'} as const
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -81,6 +83,18 @@ export function App() {
       </aside>
 
       <main>
+        <div className="global-status-bar" role="status">
+          <div className="status-location"><span>Content Studio</span><i>/</i><strong>{navLabels[activeNav]}</strong></div>
+          <div className="status-actions">
+            <span className={`service-status ${dashboard.isError?'offline':''}`}><i/>{dashboard.isError?'服务连接异常':'服务运行正常'}</span>
+            <button className="status-notifications" type="button" aria-label="通知"><Bell size={16}/></button>
+            <button className="status-user" type="button" aria-label="用户菜单">
+              <span className="status-avatar">CF</span>
+              <span><strong>本地用户</strong><small>未登录</small></span>
+              <ChevronDown size={14}/>
+            </button>
+          </div>
+        </div>
         {activeNav === 'projects' ? <>
         <header>
           <div><p className="eyebrow">WORKSPACE</p><h1>创作项目</h1><p>用知识与多模型协作，构建可信的长篇内容。</p></div>
