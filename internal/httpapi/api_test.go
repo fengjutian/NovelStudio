@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,6 +194,22 @@ func (generationProvider) Generate(context.Context, llm.GenerateRequest) (llm.Ge
 }
 func (generationProvider) HealthCheck(context.Context) error { return nil }
 
+type resumableGenerationProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *resumableGenerationProvider) Generate(context.Context, llm.GenerateRequest) (llm.GenerateResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if p.calls == 2 {
+		return llm.GenerateResponse{}, errors.New("temporary provider failure")
+	}
+	return llm.GenerateResponse{Content: "generated body"}, nil
+}
+func (*resumableGenerationProvider) HealthCheck(context.Context) error { return nil }
+
 func TestGenerationTaskCreatesDocument(t *testing.T) {
 	projects := project.NewMemoryStore()
 	documents := document.NewMemoryStore()
@@ -224,4 +242,74 @@ func TestGenerationTaskCreatesDocument(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("generation task did not complete")
+}
+
+func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
+	projects := project.NewMemoryStore()
+	documents := document.NewMemoryStore()
+	provider := &resumableGenerationProvider{}
+	generator := &generation.Service{ProviderName: "test", Provider: provider, Models: map[generation.Operation]string{generation.OperationWrite: "writer"}}
+	handler := httpapi.NewWithServices(projects, documents, knowledge.NewMemoryStore(), nil, generator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	items, _ := projects.List(context.Background())
+	projectID := items[0].ID
+	nodes := make([]project.ContentNode, 0, 2)
+	for index, title := range []string{"chapter one", "chapter two"} {
+		node, err := projects.CreateNode(context.Background(), projectID, project.CreateNodeInput{NodeType: "CHAPTER", Title: title, Position: index + 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, _, err := documents.Create(context.Background(), document.CreateInput{ProjectID: projectID, Title: title, Content: ""})
+		if err != nil {
+			t.Fatal(err)
+		}
+		documentID := doc.ID
+		node, err = projects.UpdateNode(context.Background(), node.ID, project.UpdateNodeInput{Title: title, Position: index + 1, DocumentID: &documentID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes = append(nodes, node)
+	}
+	body, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "write", "windowSize": 1})
+	createdResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createdResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/batch-generation-tasks", bytes.NewReader(body)))
+	var created task.Task
+	if err := json.NewDecoder(createdResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus := func(id string, wanted task.Status) task.Task {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+id, nil))
+			var current task.Task
+			_ = json.NewDecoder(response.Body).Decode(&current)
+			if current.Status == wanted {
+				return current
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("task %s did not reach %s", id, wanted)
+		return task.Task{}
+	}
+	waitForStatus(created.ID, task.StatusFailed)
+	versionsOne, _ := documents.Versions(context.Background(), *nodes[0].DocumentID)
+	versionsTwo, _ := documents.Versions(context.Background(), *nodes[1].DocumentID)
+	if len(versionsOne)+len(versionsTwo) != 3 || len(versionsOne) == len(versionsTwo) {
+		t.Fatalf("versions after failure = %d, %d; exactly one document should be saved", len(versionsOne), len(versionsTwo))
+	}
+	retryResponse := httptest.NewRecorder()
+	handler.ServeHTTP(retryResponse, httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+created.ID+"/retry", nil))
+	var retried task.Task
+	if err := json.NewDecoder(retryResponse.Body).Decode(&retried); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(retried.ID, task.StatusSuccess)
+	versionsOne, _ = documents.Versions(context.Background(), *nodes[0].DocumentID)
+	versionsTwo, _ = documents.Versions(context.Background(), *nodes[1].DocumentID)
+	if len(versionsOne) != 2 || len(versionsTwo) != 2 {
+		t.Fatalf("versions after retry = %d, %d", len(versionsOne), len(versionsTwo))
+	}
+	if provider.calls != 3 {
+		t.Fatalf("provider calls = %d, want 3", provider.calls)
+	}
 }

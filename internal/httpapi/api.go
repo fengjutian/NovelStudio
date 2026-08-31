@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"novelstudio/internal/airun"
@@ -337,13 +338,28 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	item := a.tasks.Create(projectItem.ID, "BATCH_GENERATE", func(ctx context.Context, progress func(int, string)) (any, error) {
-		outputs := make([]generation.Result, len(nodes))
+		latestTree, treeErr := a.store.Tree(ctx, projectItem.ID)
+		if treeErr != nil {
+			return nil, treeErr
+		}
+		latestByID := make(map[string]project.ContentNode, len(latestTree))
+		for _, node := range latestTree {
+			latestByID[node.ID] = node
+		}
+		outputs := make([]generation.Result, 0, len(nodes))
+		documents := make([]document.Document, 0, len(nodes))
 		semaphore := make(chan struct{}, input.WindowSize)
 		errorsChannel := make(chan error, len(nodes))
 		var wait sync.WaitGroup
-		for index, node := range nodes {
+		var resultMu sync.Mutex
+		var completed atomic.Int64
+		for _, originalNode := range nodes {
+			node := originalNode
+			if latest, ok := latestByID[node.ID]; ok {
+				node = latest
+			}
 			wait.Add(1)
-			go func(index int, node project.ContentNode) {
+			go func(node project.ContentNode) {
 				defer wait.Done()
 				select {
 				case semaphore <- struct{}{}:
@@ -352,14 +368,55 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 				defer func() { <-semaphore }()
+				if node.DocumentID != nil && *node.DocumentID != "" {
+					versions, versionsErr := a.docs.Versions(ctx, *node.DocumentID)
+					if versionsErr != nil {
+						errorsChannel <- versionsErr
+						return
+					}
+					if len(versions) > 1 || (len(versions) == 1 && strings.TrimSpace(versions[0].Content) != "") {
+						done := completed.Add(1)
+						progress(5+int(done)*90/len(nodes), "已跳过完成文档 "+node.Title)
+						return
+					}
+				}
 				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction + "\n当前内容节点：" + node.Title, Evidence: evidence})
 				if generateErr != nil {
 					errorsChannel <- generateErr
 					return
 				}
-				outputs[index] = result
-				progress(10+(index+1)*60/len(nodes), "已生成 "+node.Title)
-			}(index, node)
+				var doc document.Document
+				if node.DocumentID != nil && *node.DocumentID != "" {
+					current, getErr := a.docs.Get(ctx, *node.DocumentID)
+					if getErr != nil {
+						errorsChannel <- getErr
+						return
+					}
+					if _, saveErr := a.docs.CreateVersion(ctx, current.ID, document.CreateVersionInput{Content: result.Content, Reason: "AI_WRITE", AuthorType: "AI", ExpectedVersionID: current.CurrentVersionID}); saveErr != nil {
+						errorsChannel <- saveErr
+						return
+					}
+					doc, _ = a.docs.Get(ctx, current.ID)
+				} else {
+					created, _, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: node.Title, Content: result.Content})
+					if createErr != nil {
+						errorsChannel <- createErr
+						return
+					}
+					doc = created
+					documentID := created.ID
+					if _, updateErr := a.store.UpdateNode(ctx, node.ID, project.UpdateNodeInput{Title: node.Title, Position: node.Position, Metadata: node.Metadata, DocumentID: &documentID}); updateErr != nil {
+						errorsChannel <- updateErr
+						return
+					}
+				}
+				resultMu.Lock()
+				outputs = append(outputs, result)
+				documents = append(documents, doc)
+				resultMu.Unlock()
+				done := completed.Add(1)
+				progress(5+int(done)*90/len(nodes), "已保存 "+node.Title)
+			}(node)
 		}
 		wait.Wait()
 		close(errorsChannel)
@@ -368,20 +425,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 				return nil, batchErr
 			}
 		}
-		documents := make([]document.Document, 0, len(nodes))
-		for index, node := range nodes {
-			doc, _, saveErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: node.Title, Content: outputs[index].Content})
-			if saveErr != nil {
-				return nil, saveErr
-			}
-			documents = append(documents, doc)
-			documentID := doc.ID
-			if _, updateErr := a.store.UpdateNode(ctx, node.ID, project.UpdateNodeInput{Title: node.Title, Position: node.Position, Metadata: node.Metadata, DocumentID: &documentID}); updateErr != nil {
-				return nil, updateErr
-			}
-			progress(75+(index+1)*20/len(nodes), "已保存 "+node.Title)
-		}
-		return map[string]any{"documents": documents, "generations": outputs}, nil
+		return map[string]any{"documents": documents, "generations": outputs, "completed": completed.Load(), "total": len(nodes)}, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
 }
