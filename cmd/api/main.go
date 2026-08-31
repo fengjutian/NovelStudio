@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 )
 
 func main() {
+	loadEnvFile(".env")
 	addr := env("HTTP_ADDR", ":8080")
 	applyLocalModelConfig()
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, taskManager, closeStore := stores()
@@ -54,6 +57,72 @@ func main() {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func loadEnvFile(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("cannot read environment file", "path", path, "error", err)
+		}
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNumber := 0
+	loaded := 0
+	for scanner.Scan() {
+		lineNumber++
+		key, value, ok, err := parseEnvLine(scanner.Text())
+		if err != nil {
+			slog.Warn("invalid environment file entry", "path", path, "line", lineNumber, "error", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			slog.Warn("cannot set environment variable", "path", path, "line", lineNumber, "key", key, "error", err)
+			continue
+		}
+		loaded++
+	}
+	if err := scanner.Err(); err != nil {
+		slog.Warn("cannot read environment file", "path", path, "error", err)
+		return
+	}
+	slog.Info("environment file loaded", "path", path, "variables", loaded)
+}
+
+func parseEnvLine(line string) (string, string, bool, error) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false, nil
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		return "", "", false, fmt.Errorf("missing =")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || strings.ContainsAny(key, " \t") {
+		return "", "", false, fmt.Errorf("invalid variable name")
+	}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", "", false, fmt.Errorf("invalid quoted value: %w", err)
+		}
+		value = unquoted
+	} else if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		value = value[1 : len(value)-1]
+	}
+	return key, value, true, nil
 }
 
 func applyLocalModelConfig() {
