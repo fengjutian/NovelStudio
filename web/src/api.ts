@@ -27,6 +27,8 @@ export const api = {
   dashboardStats:()=>request<{projects:number;documents:number;knowledgeSources:number;pendingIssues:number;runningTasks:number;averageQualityScore:number}>('/api/v1/dashboard/stats'),
   createProject: (input: { name: string; type: ProjectType; description: string }) =>
     request<Project>('/api/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
+  updateProject: (projectId: string, input: { name: string; description: string }) =>
+    request<Project>(`/api/v1/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(input) }),
   documents: (projectId: string) => request<{ items: Document[]; total: number }>(`/api/v1/projects/${projectId}/documents`),
   createDocument: (projectId: string, input: { title: string; content: string }) =>
     request<{ document: Document }>(`/api/v1/projects/${projectId}/documents`, { method: 'POST', body: JSON.stringify(input) }),

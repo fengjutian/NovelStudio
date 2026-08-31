@@ -91,6 +91,7 @@ DELETE /api/v1/project-types/{code}
 GET    /api/v1/projects
 POST   /api/v1/projects
 GET    /api/v1/projects/{id}
+PUT    /api/v1/projects/{id}
 DELETE /api/v1/projects/{id}
 GET    /api/v1/projects/{id}/tree
 GET    /api/v1/projects/{id}/documents

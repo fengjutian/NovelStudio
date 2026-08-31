@@ -55,6 +55,11 @@ type CreateInput struct {
 	Description string `json:"description"`
 }
 
+type UpdateInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type ContentNode struct {
 	ID         string         `json:"id"`
 	ProjectID  string         `json:"projectId"`

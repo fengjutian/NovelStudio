@@ -79,6 +79,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/dashboard/stats", a.dashboardStats)
 	mux.HandleFunc("POST /api/v1/projects", a.createProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}", a.getProject)
+	mux.HandleFunc("PUT /api/v1/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", a.deleteProject)
 	mux.HandleFunc("GET /api/v1/projects/{id}/export.md", a.exportProjectMarkdown)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tree", a.getTree)
@@ -1188,6 +1189,23 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 	item, err := a.store.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
+	var input project.UpdateInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.store.Update(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		if errors.Is(err, project.ErrNotFound) {
+			a.handleStoreError(w, err)
+		} else {
+			writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, item)

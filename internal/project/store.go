@@ -19,6 +19,7 @@ type Store interface {
 	List(context.Context) ([]Project, error)
 	Get(context.Context, string) (Project, error)
 	Create(context.Context, CreateInput) (Project, error)
+	Update(context.Context, string, UpdateInput) (Project, error)
 	Delete(context.Context, string) error
 	Tree(context.Context, string) ([]ContentNode, error)
 	CreateNode(context.Context, string, CreateNodeInput) (ContentNode, error)
@@ -161,6 +162,24 @@ func (s *MemoryStore) Create(_ context.Context, input CreateInput) (Project, err
 	s.projects[id] = item
 	s.nodes[id] = defaultTree(id, input.Type)
 	s.mu.Unlock()
+	return item, nil
+}
+
+func (s *MemoryStore) Update(_ context.Context, id string, input UpdateInput) (Project, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" {
+		return Project{}, errors.New("name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.projects[id]
+	if !ok {
+		return Project{}, ErrNotFound
+	}
+	item.Name = input.Name
+	item.Description = strings.TrimSpace(input.Description)
+	item.UpdatedAt = time.Now().UTC()
+	s.projects[id] = item
 	return item, nil
 }
 

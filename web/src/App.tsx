@@ -37,6 +37,9 @@ export function App() {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
   const [type, setType] = useState<ProjectType>('NOVEL')
   const [selected, setSelected] = useState<Project | null>(null)
   const [selectedTab, setSelectedTab] = useState<WorkspaceTab>('documents')
@@ -56,10 +59,31 @@ export function App() {
       toast.success('项目创建成功')
     },
   })
+  const updateProject = useMutation({
+    mutationFn: () => api.updateProject(editingProject!.id, { name: editName, description: editDescription }),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setSelected(current => current?.id === updated.id ? updated : current)
+      setEditingProject(null)
+      toast.success('项目已更新')
+    },
+  })
 
   function submit(event: FormEvent) {
     event.preventDefault()
     create.mutate({ name, type, description })
+  }
+
+  function startEditing(project: Project) {
+    setEditingProject(project)
+    setEditName(project.name)
+    setEditDescription(project.description)
+    updateProject.reset()
+  }
+
+  function submitEdit(event: FormEvent) {
+    event.preventDefault()
+    updateProject.mutate()
   }
 
   const navLabels={projects:'项目',knowledge:'知识库',types:'内容类型',tasks:'任务中心',models:'模型与校验'} as const
@@ -116,7 +140,7 @@ export function App() {
             const info = typeDisplay(project.type,contentTypes.data?.items)
             return <article className="project-card" key={project.id} onClick={() => { setSelectedTab('documents'); setSelected(project) }}>
               <div className={`project-icon ${info.accent}`}>{info.icon}</div>
-              <div className="project-top"><span>{info.name}</span><button aria-label="项目菜单"><MoreHorizontal size={16}/></button></div>
+              <div className="project-top"><span>{info.name}</span><button type="button" aria-label="编辑项目" title="编辑项目" onClick={(event)=>{event.stopPropagation();startEditing(project)}}><MoreHorizontal size={16}/></button></div>
               <h3>{project.name}</h3>
               <p>{project.description || '尚未添加项目描述'}</p>
               <div className="progress"><i style={{ width: project.status === 'DRAFT' ? '18%' : '60%' }} /></div>
@@ -138,6 +162,13 @@ export function App() {
           <label>创作说明<textarea rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="描述目标、受众和内容要求…" /></label>
           {create.isError && <p className="form-error">{create.error.message}</p>}
           <div className="dialog-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>取消</button><button className="primary" disabled={create.isPending}>{create.isPending ? '创建中…' : '创建项目'}</button></div>
+        </form></DialogContent></Dialog>
+      <Dialog open={editingProject!==null} onOpenChange={(nextOpen)=>{if(!nextOpen&&!updateProject.isPending)setEditingProject(null)}}><DialogContent className="dialog project-edit-dialog"><form onSubmit={submitEdit}>
+          <DialogHeader className="dialog-head"><div><p className="eyebrow">EDIT PROJECT</p><DialogTitle>编辑项目</DialogTitle><DialogDescription>修改项目名称和创作说明，内容类型保持不变。</DialogDescription></div></DialogHeader>
+          <label>项目名称<Input autoFocus required maxLength={120} value={editName} onChange={(event)=>setEditName(event.target.value)} placeholder="请输入项目名称" /></label>
+          <label>创作说明<textarea rows={4} maxLength={1000} value={editDescription} onChange={(event)=>setEditDescription(event.target.value)} placeholder="描述目标、受众和内容要求" /></label>
+          {updateProject.isError&&<p className="form-error">{updateProject.error.message}</p>}
+          <div className="dialog-actions"><button type="button" className="secondary" disabled={updateProject.isPending} onClick={()=>setEditingProject(null)}>取消</button><button className="primary" disabled={updateProject.isPending||!editName.trim()}>{updateProject.isPending?'保存中…':'保存修改'}</button></div>
         </form></DialogContent></Dialog>
       {selected && <Workspace project={selected} contentTypes={contentTypes.data?.items??[]} initialTab={selectedTab} onClose={() => setSelected(null)} />}
       <Toaster richColors position="top-right"/>

@@ -149,6 +149,25 @@ func (s ProjectStore) Create(ctx context.Context, input project.CreateInput) (pr
 	return item, nil
 }
 
+func (s ProjectStore) Update(ctx context.Context, id string, input project.UpdateInput) (project.Project, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" {
+		return project.Project{}, errors.New("name is required")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE projects SET name=?,description=?,updated_at=? WHERE id=? AND deleted_at IS NULL`, input.Name, strings.TrimSpace(input.Description), time.Now().UTC(), id)
+	if err != nil {
+		return project.Project{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return project.Project{}, err
+	}
+	if count == 0 {
+		return project.Project{}, project.ErrNotFound
+	}
+	return s.Get(ctx, id)
+}
+
 func (s ProjectStore) ListContentTypes(ctx context.Context) ([]project.ContentType, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT code,name,icon,accent,description,created_at,updated_at FROM content_types ORDER BY created_at,code`)
 	if err != nil {

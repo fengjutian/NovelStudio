@@ -56,6 +56,32 @@ func TestRejectsUnsupportedProjectType(t *testing.T) {
 	}
 }
 
+func TestUpdateProject(t *testing.T) {
+	handler := httpapi.New(project.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	create := httptest.NewRecorder()
+	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewBufferString(`{"name":"Old name","type":"NOVEL","description":"Old description"}`)))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var item project.Project
+	if err := json.NewDecoder(create.Body).Decode(&item); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/projects/"+item.ID, bytes.NewBufferString(`{"name":"New name","description":"New description"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated project.Project
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "New name" || updated.Description != "New description" || updated.Type != project.TypeNovel {
+		t.Fatalf("updated = %#v", updated)
+	}
+}
+
 func TestOutlineImportCreatesHierarchy(t *testing.T) {
 	projects := project.NewMemoryStore()
 	handler := httpapi.New(projects, slog.New(slog.NewTextHandler(io.Discard, nil)))
