@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import {ArrowLeft,ArrowRight,Bell,Check,ChevronDown,ChevronLeft,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileStack,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
+import {ArrowLeft,ArrowRight,Bell,Check,ChevronDown,ChevronLeft,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
 import {MarkdownPreview} from './components/MarkdownPreview'
@@ -10,7 +10,7 @@ import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '.
 import {Input} from './components/ui/input'
 import {Select} from './components/ui/select'
 import type { ProjectType } from './types'
-import type { ContentType, Document, GenerationResult, KnowledgeFile, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
+import type { ContentNode, ContentType, Document, GenerationResult, KnowledgeFile, KnowledgeSource, MemoryEntry, OutlineItem, Project, QualityGenerationResult } from './types'
 
 type WorkspaceTab = 'documents' | 'structure' | 'generation' | 'knowledge' | 'memory' | 'quality' | 'runs'
 
@@ -332,7 +332,7 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
       <section className="workspace-content">
         {tab === 'documents' ? <>
           <div className="document-module-head"><div><Sparkles/><div><h2>章节文档生成器</h2><p>描述需求，生成并调整目录，再批量创建 Markdown 文档。</p></div></div><nav><button className={documentMode==='generator'?'active':''} onClick={()=>setDocumentMode('generator')}>生成器</button><button className={documentMode==='library'?'active':''} onClick={()=>setDocumentMode('library')}>文档工作区</button><span>{documents.data?.total??0} 个文档</span></nav></div>
-          {documentMode==='generator'?<ChapterDocumentGenerator project={project} documents={orderedDocuments} modelReady={modelStatus.data?.generationOperations??[]} onOpenDocument={document=>{setSelectedDocument(document);setDocumentMode('library')}}/>:<div className={documentBrowserCollapsed?'document-workbench browser-collapsed':'document-workbench'}>
+          {documentMode==='generator'?<ChapterDocumentGenerator project={project} modelReady={modelStatus.data?.generationOperations??[]} onOpenWorkspace={()=>setDocumentMode('library')}/>:<div className={documentBrowserCollapsed?'document-workbench browser-collapsed':'document-workbench'}>
             <aside className="document-browser"><header><div><strong>{project.name}</strong><small>{documents.data?.total??0} 个 Markdown 文档</small></div></header><div className="document-browser-list">{orderedDocuments.map(item=><button className={selectedDocument?.id===item.id?'selected':''} onClick={()=>setSelectedDocument(item)} key={item.id}><FileText size={16}/><span><strong>{item.title}</strong><small>版本 {item.versionCount} · {new Date(item.updatedAt).toLocaleString('zh-CN')}</small></span></button>)}{documents.data?.total===0&&<p className="empty-line">暂无文档，请先通过生成器创建。</p>}</div></aside>
             <button className="document-browser-toggle" title={documentBrowserCollapsed?'展开文档列表':'折叠文档列表'} aria-label={documentBrowserCollapsed?'展开文档列表':'折叠文档列表'} onClick={()=>setDocumentBrowserCollapsed(value=>!value)}>{documentBrowserCollapsed?<ChevronRight/>:<ChevronLeft/>}</button>
             <section className="document-workbench-main">{selectedDocument?<DocumentEditor key={selectedDocument.id} document={selectedDocument} embedded onBack={()=>setSelectedDocument(null)}/>:<div className="document-workbench-empty"><FileText/><strong>选择一篇文档开始编辑</strong><span>正文将使用 Markdown 编辑器打开，并保留版本历史。</span></div>}</section>
@@ -379,11 +379,11 @@ function Workspace({ project, contentTypes, initialTab, onClose }: { project: Pr
   </div>
 }
 
-function ChapterDocumentGenerator(props:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
+function ChapterDocumentGenerator(props:{project:Project;modelReady:string[];onOpenWorkspace:()=>void}){
   return <LegacyChapterDocumentGenerator {...props}/>
 }
 
-function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocument}:{project:Project;documents:Document[];modelReady:string[];onOpenDocument:(document:Document)=>void}){
+function LegacyChapterDocumentGenerator({project,modelReady,onOpenWorkspace}:{project:Project;modelReady:string[];onOpenWorkspace:()=>void}){
   const queryClient=useQueryClient()
   const initialDraft=useRef(loadChapterDraft(project)).current
   const draftProjectId=useRef(project.id)
@@ -394,7 +394,6 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   const[splitMode,setSplitMode]=useState<'LEAF'|'ALL'>(initialDraft.splitMode)
   const[outlineTaskId,setOutlineTaskId]=useState('')
   const[nodeIds,setNodeIds]=useState<string[]>(initialDraft.nodeIds)
-  const[batchTaskId,setBatchTaskId]=useState('')
   const[assistOpen,setAssistOpen]=useState(false)
   const[assistPrompt,setAssistPrompt]=useState('')
   const[assistTaskId,setAssistTaskId]=useState('')
@@ -408,10 +407,9 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
     if(draftProjectId.current===project.id)return
     const draft=loadChapterDraft(project)
     setRequirement(draft.requirement);setOutline(draft.outline);setBookTitle(draft.bookTitle);setKnowledgeQuery(draft.knowledgeQuery);setSplitMode(draft.splitMode);setNodeIds(draft.nodeIds)
-    setOutlineTaskId('');setBatchTaskId('');setAssistTaskId('');appliedTask.current='';draftProjectId.current=project.id
+    setOutlineTaskId('');setAssistTaskId('');appliedTask.current='';draftProjectId.current=project.id
   },[project])
   const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
-  const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const assistTask=useQuery({queryKey:['chapter-brief-assist-task',assistTaskId],queryFn:()=>api.task<GenerationResult>(assistTaskId),enabled:Boolean(assistTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const assist=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:modelReady.includes('PLAN')?'PLAN':'OUTLINE',instruction:`根据用户的初步想法，撰写一份清晰、具体、可直接用于规划目录的创作简报。简报应包含题材与主题、目标读者、故事或内容范围、主要风格、预计篇幅和关键创作要求。只输出简报正文，不要解释。\n初步想法：${assistPrompt}`,title:`${bookTitle}创作简报`,documentId:'',knowledgeQuery,content:requirement,save:false}),onSuccess:task=>setAssistTaskId(task.id)})
   useEffect(()=>{
@@ -426,17 +424,13 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   },[assistTask.data?.status,assistTask.data?.error,assistTaskId])
   const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。保留合理层级，补充缺失章节。\n写作需求：${requirement}`:`为《${bookTitle}》生成可直接用于批量创作的 Markdown 章节目录。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([])}})
   useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(normalizeGeneratedOutline(generated));appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
-  const confirm=useMutation({mutationFn:()=>api.importOutline(project.id,{content:outline,preview:false}),onSuccess:data=>{const nodes=data.items as Array<{id:string;parentId?:string|null}>;const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes.map(item=>item.id):nodes.filter(item=>!parents.has(item.id)).map(item=>item.id);setNodeIds(selected);queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`目录已确认，将生成 ${selected.length} 篇文档`)}})
-  const generateDocuments=useMutation({mutationFn:()=>api.batchGenerate(project.id,{nodeIds,instruction:`为《${bookTitle}》按目录逐篇生成完整正文。${requirement}`,knowledgeQuery,windowSize:2}),onSuccess:task=>setBatchTaskId(task.id)})
-  useEffect(()=>{if(batchTask.data?.status==='SUCCESS'){queryClient.invalidateQueries({queryKey:['documents',project.id]})}},[batchTask.data?.status,project.id,queryClient])
+  const confirm=useMutation({mutationFn:async()=>{const data=await api.importOutline(project.id,{content:outline,preview:false});const nodes=data.items as ContentNode[];const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes:nodes.filter(item=>!parents.has(item.id));for(const node of selected){const created=await api.createDocument(project.id,{title:node.title,content:''});await api.updateNode(node.id,{title:node.title,position:node.position,metadata:node.metadata,documentId:created.document.id})}return selected},onSuccess:selected=>{const confirmedIds=selected.map(item=>item.id);setNodeIds(confirmedIds);try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds:confirmedIds} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}queryClient.invalidateQueries({queryKey:['tree',project.id]});queryClient.invalidateQueries({queryKey:['documents',project.id]});toast.success(`目录已确认，已创建 ${selected.length} 篇空白文档`);onOpenWorkspace()}})
   const running=outlineTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(outlineTask.data.status)
-  const batchRunning=batchTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(batchTask.data.status)
-  const step=nodeIds.length?4:outline&&!running?3:running?2:1
+  const step=outline&&!running?3:running?2:1
   const outlineLines=outline.split('\n').filter(line=>/^#{1,6}\s+/.test(line.trim()))
   const chapterCount=outlineLines.filter(line=>/^#{2,6}\s+/.test(line.trim())).length
   const canOutline=modelReady.includes('OUTLINE')
-  const canWrite=modelReady.includes('WRITE')
-  const steps=[['填写需求','描述主题与目标'],['生成目录','AI 规划章节'],['修改确认','校对目录结构'],['生成文档','批量创建正文']]
+  const steps=[['填写需求','描述主题与目标'],['生成目录','AI 规划章节'],['确认目录','创建空白章节文档']]
   return <div className="chapter-generator">
     <div className="generator-steps" aria-label="章节生成进度">{steps.map(([label,description],index)=><div className={step===index+1?'active':step>index+1?'done':''} key={label} aria-current={step===index+1?'step':undefined}><b>{step>index+1?<Check size={14}/>:index+1}</b><span><strong>{label}</strong><small>{description}</small></span>{index<3&&<ChevronRight className="step-chevron"/>}</div>)}</div>
     <div className="generator-layout"><div className="generator-flow">
@@ -454,13 +448,9 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
       <section className="generator-main-card generator-flow-step" data-step="3">
         <div className="outline-editor-head"><div><strong>步骤 3 · 修改并确认目录</strong><span>{outline?'校对层级和标题，确认后锁定生成范围':'等待生成目录，也可以直接粘贴已有目录'}</span></div>{outline&&<div className="outline-stats"><span>{outlineLines.length} 个条目</span><span>{chapterCount} 个章节</span></div>}<button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([])}}>清空</button></div>
         <textarea className="outline-markdown-editor" rows={14} value={outline} onChange={event=>{setOutline(event.target.value);setNodeIds([])}} placeholder={'# 第一部分\n## 第一章\n### 第一节'}/>
-        <button className="secondary confirm-outline" disabled={!outline.trim()||confirm.isPending||nodeIds.length>0} onClick={()=>confirm.mutate()}>{nodeIds.length?<><Check size={15}/> 已确认 {nodeIds.length} 篇</>:(confirm.isPending?'正在确认…':'确认目录并进入下一步')}</button>
+        <button className="secondary confirm-outline" disabled={confirm.isPending||(!nodeIds.length&&!outline.trim())} onClick={()=>nodeIds.length?onOpenWorkspace():confirm.mutate()}>{nodeIds.length?<><Check size={15}/> 已创建 {nodeIds.length} 篇空白文档 · 进入文档工作区</>:(confirm.isPending?'正在创建章节文档…':'确认目录并进入文档工作区')}</button>
         {confirm.isError&&<p className="quality-error">{confirm.error.message}</p>}
       </section>
-      <section className={nodeIds.length?'generator-main-card generator-flow-step generator-action final ready':'generator-main-card generator-flow-step generator-action final'} data-step="4">
-        <span className="action-icon"><FileStack/></span><div><small>步骤 4</small><h3>批量生成正文</h3><p>{!canWrite?'写作模型尚未配置，暂时无法生成正文。':nodeIds.length?`将以 2 个章节为一组依次生成，共 ${nodeIds.length} 篇。`:'请先确认目录，再开始批量生成。'}</p></div>{batchRunning&&<div className="generator-progress"><i><b style={{width:`${batchTask.data?.progress??0}%`}}/></i><span>{batchTask.data?.message}</span></div>}<button className="primary generate-documents" disabled={!nodeIds.length||generateDocuments.isPending||Boolean(batchRunning)||!canWrite} onClick={()=>generateDocuments.mutate()}>{batchRunning?`正在生成 · ${batchTask.data?.progress??0}%`:`生成 ${nodeIds.length||0} 篇文档`}<ArrowRight size={15}/></button>{(generateDocuments.isError||batchTask.data?.status==='FAILED')&&<p className="quality-error">{generateDocuments.error?.message||batchTask.data?.error}</p>}
-      </section>
-      {batchTask.data?.status==='SUCCESS'&&<section className="generator-success"><strong>文档生成完成</strong><p>已保存到文档工作区，可继续编辑、扩写和管理版本。</p>{documents.slice(0,3).map(item=><button key={item.id} onClick={()=>onOpenDocument(item)}>{item.title}<ArrowRight size={13}/></button>)}</section>}
     </div><aside className="generator-side">
       <section className="generator-settings"><div className="side-section-title"><Settings2/><div><h3>输出设置</h3><p>决定正文如何拆分与引用资料</p></div></div><label>作品名称<Input value={bookTitle} onChange={event=>setBookTitle(event.target.value)}/></label><label>文档拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([])}}><option value="LEAF">每个末级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：人物、世界观或参考资料"/></label></section>
     </aside></div>
@@ -510,10 +500,14 @@ function DocumentEditor({ document, onBack, embedded=false }: { document: Docume
   const copilotRange=useRef({start:0,end:0})
   const [copilotTaskId,setCopilotTaskId]=useState('')
   const [appliedTaskId,setAppliedTaskId]=useState('')
+  const [draftTaskId,setDraftTaskId]=useState('')
+  const appliedDraftTask=useRef('')
   const versions = useQuery({ queryKey: ['versions', document.id], queryFn: () => api.versions(document.id) })
   const diff = useQuery({queryKey:['document-diff',document.id,compareFrom,versions.data?.items[0]?.id],queryFn:()=>api.diffVersions(document.id,compareFrom,versions.data!.items[0].id),enabled:Boolean(compareFrom&&versions.data?.items[0]?.id&&compareFrom!==versions.data?.items[0]?.id)})
   const copilotTask=useQuery({queryKey:['copilot-task',copilotTaskId],queryFn:()=>api.task<GenerationResult>(copilotTaskId),enabled:Boolean(copilotTaskId),refetchInterval:query=>['SUCCESS','FAILED','CANCELLED'].includes(query.state.data?.status??'')?false:700})
   const copilot=useMutation({mutationFn:(action:string)=>{copilotRange.current=selection.end>selection.start?selection:{start:0,end:content.length};const selected=content.slice(copilotRange.current.start,copilotRange.current.end);return api.createGenerationTask(document.projectId,{operation:'POLISH',instruction:`执行文本${action}。只输出处理后的文本，不要解释，不要添加代码围栏。`,title:'',documentId:'',knowledgeQuery:'',content:selected,save:false})},onSuccess:task=>setCopilotTaskId(task.id)})
+  const draftTask=useQuery({queryKey:['document-draft-task',draftTaskId],queryFn:()=>api.task<GenerationResult>(draftTaskId),enabled:Boolean(draftTaskId),refetchInterval:query=>['SUCCESS','FAILED','CANCELLED'].includes(query.state.data?.status??'')?false:700})
+  const generateDraft=useMutation({mutationFn:()=>api.createGenerationTask(document.projectId,{operation:'WRITE',instruction:`根据章节标题《${document.title}》生成完整正文。正文应结构完整、内容连贯，只输出 Markdown 正文，不要解释。`,title:document.title,documentId:document.id,knowledgeQuery:'',content:'',save:true}),onSuccess:task=>setDraftTaskId(task.id)})
   const save = useMutation({
     mutationFn: () => api.saveVersion(document.id, { content, reason: autoSave ? 'AUTO_SAVE' : 'HUMAN_EDIT', expectedVersionId: baseVersionId }),
     onSuccess: (version) => {
@@ -549,6 +543,7 @@ function DocumentEditor({ document, onBack, embedded=false }: { document: Docume
   }, [autoSave, content, dirty, baseVersionId, save])
 
   useEffect(()=>{const generated=copilotTask.data?.result?.generation.content;if(!generated||copilotTask.data?.status!=='SUCCESS'||appliedTaskId===copilotTaskId)return;const range=copilotRange.current;setContent(value=>value.slice(0,range.start)+generated+value.slice(range.end));setAppliedTaskId(copilotTaskId)},[copilotTask.data?.status,copilotTask.data?.result,copilotTaskId,appliedTaskId])
+  useEffect(()=>{const result=draftTask.data?.result;if(!result||draftTask.data?.status!=='SUCCESS'||appliedDraftTask.current===draftTaskId)return;setContent(result.generation.content);setSavedContent(result.generation.content);if(result.version)setBaseVersionId(result.version.id);appliedDraftTask.current=draftTaskId;queryClient.invalidateQueries({queryKey:['versions',document.id]});queryClient.invalidateQueries({queryKey:['documents',document.projectId]});toast.success('正文已生成并保存为新版本')},[draftTask.data?.status,draftTask.data?.result,draftTaskId,document.id,document.projectId,queryClient])
 
   function reloadLatest() {
     if (!latest) return
@@ -561,7 +556,8 @@ function DocumentEditor({ document, onBack, embedded=false }: { document: Docume
   return <section className={embedded?'document-editor embedded':'document-editor'}>
     <div className="editor-head">{!embedded&&<button onClick={onBack}><ArrowLeft size={14}/> 文档列表</button>}<div><p className="eyebrow">MARKDOWN DOCUMENT</p><h2>{document.title}</h2></div><label><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} /> 3 秒自动保存</label><div className="markdown-mode-switch editor-mode-tabs" role="group" aria-label="Markdown 显示模式"><button className={editorMode==='edit'?'active':''} onClick={()=>setEditorMode('edit')}>编辑</button><button className={editorMode==='preview'?'active':''} onClick={()=>setEditorMode('preview')}>预览</button></div><button className="primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : dirty ? '保存新版本' : '已保存'}</button></div>
     {save.isError && <div className="conflict-banner"><span>{save.error.message}</span><button onClick={reloadLatest}>载入服务器最新版本</button></div>}
-    <div className="copilot-bar"><strong>AI Copilot</strong><span>{selection.end>selection.start?`已选择 ${selection.end-selection.start} 字符`:'未选择时处理全文'}</span>{[{action:'润色',tip:'优化语言、节奏和表达，不改变原意'},{action:'扩写',tip:'补充细节、描写和论述'},{action:'缩写',tip:'压缩内容并保留核心信息'},{action:'改写',tip:'用不同表达方式重写内容'},{action:'续写',tip:'依据上下文继续创作后续内容'},{action:'总结',tip:'提炼内容的主要观点和情节'},{action:'分析',tip:'分析结构、逻辑、风格和潜在问题'},{action:'检查',tip:'检查错字、语病、逻辑与一致性'}].map(({action,tip})=><button title={`${tip}；${selection.end>selection.start?'处理当前选区':'处理全文'}`} disabled={copilot.isPending||copilotTask.data?.status==='RUNNING'} onClick={()=>copilot.mutate(action)} key={action}>{action}</button>)}</div>
+    <div className="copilot-bar"><strong>AI Copilot</strong><button className="primary" disabled={generateDraft.isPending||draftTask.data?.status==='RUNNING'} onClick={()=>generateDraft.mutate()}><Sparkles size={13}/>{generateDraft.isPending||draftTask.data?.status==='RUNNING'?`正在生成正文 ${draftTask.data?.progress??0}%`:'生成正文'}</button><span>{selection.end>selection.start?`已选择 ${selection.end-selection.start} 字符`:'未选择时处理全文'}</span>{[{action:'润色',tip:'优化语言、节奏和表达，不改变原意'},{action:'扩写',tip:'补充细节、描写和论述'},{action:'缩写',tip:'压缩内容并保留核心信息'},{action:'改写',tip:'用不同表达方式重写内容'},{action:'续写',tip:'依据上下文继续创作后续内容'},{action:'总结',tip:'提炼内容的主要观点和情节'},{action:'分析',tip:'分析结构、逻辑、风格和潜在问题'},{action:'检查',tip:'检查错字、语病、逻辑与一致性'}].map(({action,tip})=><button title={`${tip}；${selection.end>selection.start?'处理当前选区':'处理全文'}`} disabled={copilot.isPending||copilotTask.data?.status==='RUNNING'} onClick={()=>copilot.mutate(action)} key={action}>{action}</button>)}</div>
+    {(generateDraft.isError||draftTask.data?.status==='FAILED')&&<p className="quality-error">{generateDraft.error?.message||draftTask.data?.error}</p>}
     {(copilot.isPending||copilotTask.data?.status==='RUNNING')&&<div className="copilot-status">AI 正在处理选中文本…</div>}{(copilot.isError||copilotTask.data?.status==='FAILED')&&<p className="quality-error">{copilot.error?.message||copilotTask.data?.error}</p>}
     <div className={versionsCollapsed?'editor-layout versions-collapsed':'editor-layout'}><div className="markdown-pane">{editorMode==='edit'?<MarkdownEditor value={content} onChange={setContent} onSelectionChange={(start,end)=>setSelection({start,end})}/>:<MarkdownPreview value={content}/>}<footer><span>{content.length} 字符</span><span>{editorMode==='preview'?'Markdown 预览':dirty ? '有未保存修改' : `当前版本 v${latest?.versionNumber ?? '—'}`}</span></footer></div><aside className="version-panel"><h3>版本历史 <span>{versions.data?.total ?? 0}</span></h3>{versions.data?.items.map((version) => <article className={version.id === baseVersionId ? 'current' : ''} key={version.id}><button onClick={() => { setContent(version.content); setBaseVersionId(latest?.id ?? version.id) }}><strong>v{version.versionNumber}</strong><span>{version.reason}</span><small>{new Date(version.createdAt).toLocaleString('zh-CN')}</small></button>{version.id !== latest?.id && <div className="version-actions"><button className="restore" onClick={() => setCompareFrom(version.id)}>与最新版比较</button><button className="restore" disabled={restore.isPending} onClick={() => restore.mutate(version.id)}>恢复</button></div>}</article>)}</aside><button className="version-panel-toggle" title={versionsCollapsed?'展开版本历史':'折叠版本历史'} aria-label={versionsCollapsed?'展开版本历史':'折叠版本历史'} onClick={()=>setVersionsCollapsed(value=>!value)}>{versionsCollapsed?<ChevronLeft/>:<ChevronRight/>}</button></div>
     <Dialog open={Boolean(compareFrom)} onOpenChange={open=>{if(!open)setCompareFrom('')}}><DialogContent className="dialog diff-dialog"><section className="diff-panel"><header><div><h3>版本差异</h3><small>{diff.data?`新增 ${diff.data.added} 行 · 删除 ${diff.data.deleted} 行`:'正在加载差异…'}</small></div></header>{diff.isError&&<p className="quality-error">{diff.error.message}</p>}{diff.data&&<pre>{diff.data.lines.map((line,index)=><span className={line.type.toLowerCase()} key={`${index}-${line.oldLine}-${line.newLine}`}><i>{line.oldLine??' '}</i><i>{line.newLine??' '}</i><b>{line.type==='ADDED'?'+':line.type==='DELETED'?'-':' '}</b>{line.content||' '}</span>)}</pre>}</section></DialogContent></Dialog>
