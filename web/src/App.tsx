@@ -399,6 +399,7 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   const[assistPrompt,setAssistPrompt]=useState('')
   const[assistTaskId,setAssistTaskId]=useState('')
   const appliedTask=useRef('')
+  const notifiedAssistTask=useRef('')
   useEffect(()=>{
     if(draftProjectId.current!==project.id)return
     try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}
@@ -413,6 +414,16 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
   const batchTask=useQuery({queryKey:['chapter-batch-task',batchTaskId],queryFn:()=>api.task(batchTaskId),enabled:Boolean(batchTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const assistTask=useQuery({queryKey:['chapter-brief-assist-task',assistTaskId],queryFn:()=>api.task<GenerationResult>(assistTaskId),enabled:Boolean(assistTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
   const assist=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:modelReady.includes('PLAN')?'PLAN':'OUTLINE',instruction:`根据用户的初步想法，撰写一份清晰、具体、可直接用于规划目录的创作简报。简报应包含题材与主题、目标读者、故事或内容范围、主要风格、预计篇幅和关键创作要求。只输出简报正文，不要解释。\n初步想法：${assistPrompt}`,title:`${bookTitle}创作简报`,documentId:'',knowledgeQuery,content:requirement,save:false}),onSuccess:task=>setAssistTaskId(task.id)})
+  useEffect(()=>{
+    if(!assistTaskId||notifiedAssistTask.current===assistTaskId)return
+    if(assistTask.data?.status==='SUCCESS'){
+      notifiedAssistTask.current=assistTaskId
+      toast.success('AI 简报生成完成',{description:'点击“AI 助写”可查看并使用生成结果。'})
+    }else if(assistTask.data?.status==='FAILED'||assistTask.data?.status==='CANCELLED'){
+      notifiedAssistTask.current=assistTaskId
+      toast.error(assistTask.data.status==='FAILED'?'AI 简报生成失败':'AI 简报任务已取消',{description:assistTask.data.error||undefined})
+    }
+  },[assistTask.data?.status,assistTask.data?.error,assistTaskId])
   const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。保留合理层级，补充缺失章节。\n写作需求：${requirement}`:`为《${bookTitle}》生成可直接用于批量创作的 Markdown 章节目录。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([])}})
   useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(normalizeGeneratedOutline(generated));appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
   const confirm=useMutation({mutationFn:()=>api.importOutline(project.id,{content:outline,preview:false}),onSuccess:data=>{const nodes=data.items as Array<{id:string;parentId?:string|null}>;const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const selected=splitMode==='ALL'?nodes.map(item=>item.id):nodes.filter(item=>!parents.has(item.id)).map(item=>item.id);setNodeIds(selected);queryClient.invalidateQueries({queryKey:['tree',project.id]});toast.success(`目录已确认，将生成 ${selected.length} 篇文档`)}})
@@ -431,7 +442,7 @@ function LegacyChapterDocumentGenerator({project,documents,modelReady,onOpenDocu
     <div className="generator-layout"><div className="generator-flow">
       <section className="generator-main-card generator-flow-step" data-step="1">
         <div className="generator-section-title"><span><Sparkles/></span><div><p>步骤 1 · 创作简报</p><h3>你想写一部怎样的作品？</h3></div><small>{requirement.length} / 2000</small></div>
-        <label className="generator-requirement"><span className="sr-only">写作需求</span><span className="generator-requirement-wrap"><textarea maxLength={2000} rows={7} value={requirement} onChange={event=>setRequirement(event.target.value)} placeholder={'描述主题、目标读者、内容范围与预计篇数。\n例如：面向悬疑小说读者，规划一部 20 章的近未来故事；节奏紧凑，每章保留一个悬念。'}/><button type="button" className="brief-assist-trigger" disabled={!modelReady.includes('PLAN')&&!modelReady.includes('OUTLINE')} onClick={()=>{setAssistPrompt(requirement);setAssistTaskId('');setAssistOpen(true)}}><Sparkles size={14}/> AI 助写</button></span></label>
+        <label className="generator-requirement"><span className="sr-only">写作需求</span><span className="generator-requirement-wrap"><textarea maxLength={2000} rows={7} value={requirement} onChange={event=>setRequirement(event.target.value)} placeholder={'描述主题、目标读者、内容范围与预计篇数。\n例如：面向悬疑小说读者，规划一部 20 章的近未来故事；节奏紧凑，每章保留一个悬念。'}/><button type="button" className="brief-assist-trigger" disabled={!modelReady.includes('PLAN')&&!modelReady.includes('OUTLINE')} onClick={()=>{if(!assistTaskId)setAssistPrompt(requirement);setAssistOpen(true)}}><Sparkles size={14}/> {assistTask.data?.status==='RUNNING'?`AI 助写 ${assistTask.data.progress}%`:'AI 助写'}</button></span></label>
       </section>
       <section className="generator-main-card generator-flow-step" data-step="2">
         <div className="generator-section-title"><span><Sparkles/></span><div><p>步骤 2</p><h3>生成目录</h3></div></div>
