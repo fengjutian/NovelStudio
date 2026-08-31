@@ -106,6 +106,7 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/knowledge/facts", a.listFacts)
 	mux.HandleFunc("GET /api/v1/projects/{id}/memories", a.listMemories)
 	mux.HandleFunc("POST /api/v1/projects/{id}/memories", a.createMemory)
+	mux.HandleFunc("POST /api/v1/projects/{id}/memory-extraction-tasks", a.createMemoryExtractionTask)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", a.deleteMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
 	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
@@ -472,6 +473,7 @@ func (a *API) importOutline(w http.ResponseWriter, r *http.Request) {
 	}
 	found := input.ParentID == ""
 	positions := map[string]int{}
+	existing := map[string]project.ContentNode{}
 	for _, node := range tree {
 		if node.ID == input.ParentID {
 			found = true
@@ -482,6 +484,11 @@ func (a *API) importOutline(w http.ResponseWriter, r *http.Request) {
 		}
 		if node.Position > positions[parent] {
 			positions[parent] = node.Position
+		}
+		level := fmt.Sprint(node.Metadata["outlineLevel"])
+		key := parent + "\x00" + level + "\x00" + strings.TrimSpace(node.Title)
+		if _, duplicated := existing[key]; !duplicated {
+			existing[key] = node
 		}
 	}
 	if !found {
@@ -504,12 +511,22 @@ func (a *API) importOutline(w http.ResponseWriter, r *http.Request) {
 			value := parentID
 			parent = &value
 		}
+		key := parentID + "\x00" + strconv.Itoa(outlineItem.Level) + "\x00" + strings.TrimSpace(outlineItem.Title)
+		if node, ok := existing[key]; ok {
+			created = append(created, node)
+			parents[outlineItem.Level] = node.ID
+			for level := outlineItem.Level + 1; level <= 6; level++ {
+				delete(parents, level)
+			}
+			continue
+		}
 		node, createErr := a.store.CreateNode(r.Context(), projectItem.ID, project.CreateNodeInput{ParentID: parent, NodeType: outlineItem.NodeType, Title: outlineItem.Title, Position: positions[parentID], Metadata: map[string]any{"outlineLevel": outlineItem.Level}})
 		if createErr != nil {
 			writeError(w, http.StatusUnprocessableEntity, "IMPORT_FAILED", createErr.Error())
 			return
 		}
 		created = append(created, node)
+		existing[key] = node
 		parents[outlineItem.Level] = node.ID
 		for level := outlineItem.Level + 1; level <= 6; level++ {
 			delete(parents, level)
@@ -595,6 +612,68 @@ func (a *API) memoryEvidence(ctx context.Context, projectID string) []generation
 		evidence = append(evidence, generation.Evidence{ID: item.ID, Source: "Story Memory / " + item.Type + " / " + item.Name, Authority: "INTERNAL", Content: item.Summary})
 	}
 	return evidence
+}
+func (a *API) createMemoryExtractionTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil || !a.generator.Configured(generation.OperationMemory) {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "memory extractor model is not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input struct {
+		DocumentID string `json:"documentId"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	doc, err := a.docs.Get(r.Context(), input.DocumentID)
+	if err != nil || doc.ProjectID != projectItem.ID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "document not found in project")
+		return
+	}
+	versions, err := a.docs.Versions(r.Context(), doc.ID)
+	if err != nil || len(versions) == 0 || strings.TrimSpace(versions[0].Content) == "" {
+		writeError(w, http.StatusUnprocessableEntity, "DOCUMENT_EMPTY", "document has no content to extract")
+		return
+	}
+	content := versions[0].Content
+	item := a.tasks.Create(projectItem.ID, "MEMORY_EXTRACT", func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(20, "正在识别人物、地点、时间线、剧情和伏笔")
+		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationMemory, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: "从《" + doc.Title + "》中提取需要跨章节保持一致的长期记忆", Content: content})
+		if generateErr != nil {
+			return nil, generateErr
+		}
+		var decoded struct {
+			Memories []knowledge.CreateMemoryInput `json:"memories"`
+		}
+		raw := strings.TrimSpace(generated.Content)
+		raw = strings.TrimPrefix(raw, "```json")
+		raw = strings.TrimSuffix(raw, "```")
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil {
+			return nil, fmt.Errorf("decode extracted memories: %w", err)
+		}
+		valid := make([]knowledge.CreateMemoryInput, 0, len(decoded.Memories))
+		for _, memory := range decoded.Memories {
+			memory.Type = strings.ToUpper(strings.TrimSpace(memory.Type))
+			if memory.Type != "CHARACTER" && memory.Type != "PLACE" && memory.Type != "TIMELINE" && memory.Type != "PLOT" && memory.Type != "FORESHADOW" {
+				continue
+			}
+			if strings.TrimSpace(memory.Name) == "" || strings.TrimSpace(memory.Summary) == "" {
+				continue
+			}
+			memory.Status = "PROPOSED"
+			valid = append(valid, memory)
+			if len(valid) == 30 {
+				break
+			}
+		}
+		progress(90, "记忆建议已生成，等待人工确认")
+		return map[string]any{"memories": valid, "generation": generated, "documentId": doc.ID}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
 }
 func (a *API) updateFactStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {

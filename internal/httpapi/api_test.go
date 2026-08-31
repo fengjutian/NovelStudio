@@ -102,6 +102,15 @@ func TestOutlineImportCreatesHierarchy(t *testing.T) {
 	if created[1].ParentID == nil || *created[1].ParentID != created[0].ID || created[2].ParentID == nil || *created[2].ParentID != created[1].ID {
 		t.Fatalf("unexpected hierarchy: %#v", created)
 	}
+	repeated := httptest.NewRecorder()
+	handler.ServeHTTP(repeated, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/outline-import", bytes.NewBufferString(`{"content":"# 第一卷\n## 第一章\n### 第一节","preview":false}`)))
+	if repeated.Code != http.StatusCreated {
+		t.Fatalf("repeat status=%d body=%s", repeated.Code, repeated.Body.String())
+	}
+	afterRepeat, err := projects.Tree(context.Background(), projectID)
+	if err != nil || len(afterRepeat) != len(tree) {
+		t.Fatalf("repeated import created duplicates: before=%d after=%d err=%v", len(tree), len(afterRepeat), err)
+	}
 }
 
 func TestDocumentAndKnowledgeLifecycle(t *testing.T) {

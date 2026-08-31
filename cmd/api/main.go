@@ -166,6 +166,7 @@ func generationService(recorder airun.Recorder) *generation.Service {
 		generation.OperationPolish:  first(strings.TrimSpace(os.Getenv("POLISHER_MODEL")), writerModel),
 		generation.OperationRepair:  first(strings.TrimSpace(os.Getenv("REPAIR_MODEL")), writerModel),
 		generation.OperationExtract: first(strings.TrimSpace(os.Getenv("EXTRACTOR_MODEL")), writerModel),
+		generation.OperationMemory:  first(strings.TrimSpace(os.Getenv("EXTRACTOR_MODEL")), writerModel),
 	}
 	configured := false
 	for _, model := range models {

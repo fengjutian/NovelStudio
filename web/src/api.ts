@@ -1,4 +1,4 @@
-import type { AIRunList, AITask, ContentNode, ContentType, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeFile, KnowledgeSource, LocalModelConfig, MemoryEntry, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
+import type { AIRunList, AITask, ContentNode, ContentType, Document, DocumentDiff, DocumentVersion, Fact, GenerationResult, KnowledgeFile, KnowledgeSource, LocalModelConfig, MemoryEntry, MemoryExtractionResult, OutlineItem, PipelineResult, Project, ProjectList, ProjectType, QualityGenerationResult, QualityRecord, SearchHit } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
@@ -71,6 +71,7 @@ export const api = {
   extractFacts: (projectId:string,documentId:string) => request<AITask>(`/api/v1/projects/${projectId}/fact-extraction-tasks`,{method:'POST',body:JSON.stringify({documentId})}),
   memories:(projectId:string,type='')=>request<{items:MemoryEntry[];total:number}>(`/api/v1/projects/${projectId}/memories?type=${encodeURIComponent(type)}`),
   createMemory:(projectId:string,input:{type:MemoryEntry['type'];name:string;summary:string;status:string;attributes?:Record<string,unknown>})=>request<MemoryEntry>(`/api/v1/projects/${projectId}/memories`,{method:'POST',body:JSON.stringify(input)}),
+  extractMemories:(projectId:string,documentId:string)=>request<AITask<MemoryExtractionResult>>(`/api/v1/projects/${projectId}/memory-extraction-tasks`,{method:'POST',body:JSON.stringify({documentId})}),
   deleteMemory:(id:string)=>request<void>(`/api/v1/memories/${id}`,{method:'DELETE'}),
   uploadKnowledge: async (projectId:string,file:File,authority:string) => { const form=new FormData();form.append('file',file);form.append('authority',authority);const response=await fetch(`/api/v1/projects/${projectId}/knowledge/files`,{method:'POST',body:form});if(!response.ok)throw new Error((await response.json().catch(()=>null))?.error?.message??'上传失败');return response.json() as Promise<{file:KnowledgeFile;chunkCount:number}> },
   knowledgeFiles:(projectId='')=>request<{items:KnowledgeFile[];total:number}>(`/api/v1/knowledge/files?projectId=${encodeURIComponent(projectId)}`),

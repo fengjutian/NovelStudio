@@ -21,10 +21,11 @@ const (
 	OperationPolish  Operation = "POLISH"
 	OperationRepair  Operation = "REPAIR"
 	OperationExtract Operation = "EXTRACT"
+	OperationMemory  Operation = "MEMORY"
 )
 
 func (o Operation) Valid() bool {
-	return o == OperationPlan || o == OperationOutline || o == OperationWrite || o == OperationPolish || o == OperationRepair || o == OperationExtract
+	return o == OperationPlan || o == OperationOutline || o == OperationWrite || o == OperationPolish || o == OperationRepair || o == OperationExtract || o == OperationMemory
 }
 
 type Request struct {
@@ -132,7 +133,7 @@ func temperature(operation Operation) float64 {
 	if operation == OperationWrite {
 		return 0.7
 	}
-	if operation == OperationPolish || operation == OperationRepair || operation == OperationExtract {
+	if operation == OperationPolish || operation == OperationRepair || operation == OperationExtract || operation == OperationMemory {
 		return 0.3
 	}
 	return 0.4
