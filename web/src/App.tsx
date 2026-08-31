@@ -67,6 +67,7 @@ export function App() {
       setEditingProject(null)
       toast.success('项目已更新')
     },
+    onError: (error) => toast.error('保存失败', { description: error.message }),
   })
 
   function submit(event: FormEvent) {
@@ -119,6 +120,7 @@ export function App() {
             </button>
           </div>
         </div>
+        <div className="main-scroll-content">
         {activeNav === 'projects' ? <>
         <header>
           <div><p className="eyebrow">WORKSPACE</p><h1>创作项目</h1><p>用知识与多模型协作，构建可信的长篇内容。</p></div>
@@ -151,6 +153,7 @@ export function App() {
           <button className="new-card" onClick={() => setOpen(true)}><Plus/><strong>开始新的创作</strong><small>小说、电影解说或技术文档</small></button>
         </section>
         </> : <GlobalPage page={activeNav} projects={projects.data?.items ?? []} />}
+        </div>
       </main>
 
       <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dialog"><form onSubmit={submit}>
@@ -167,7 +170,6 @@ export function App() {
           <DialogHeader className="dialog-head"><div><p className="eyebrow">EDIT PROJECT</p><DialogTitle>编辑项目</DialogTitle><DialogDescription>修改项目名称和创作说明，内容类型保持不变。</DialogDescription></div></DialogHeader>
           <label>项目名称<Input autoFocus required maxLength={120} value={editName} onChange={(event)=>setEditName(event.target.value)} placeholder="请输入项目名称" /></label>
           <label>创作说明<textarea rows={4} maxLength={1000} value={editDescription} onChange={(event)=>setEditDescription(event.target.value)} placeholder="描述目标、受众和内容要求" /></label>
-          {updateProject.isError&&<p className="form-error">{updateProject.error.message}</p>}
           <div className="dialog-actions"><button type="button" className="secondary" disabled={updateProject.isPending} onClick={()=>setEditingProject(null)}>取消</button><button className="primary" disabled={updateProject.isPending||!editName.trim()}>{updateProject.isPending?'保存中…':'保存修改'}</button></div>
         </form></DialogContent></Dialog>
       {selected && <Workspace project={selected} contentTypes={contentTypes.data?.items??[]} initialTab={selectedTab} onClose={() => setSelected(null)} />}
