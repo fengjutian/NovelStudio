@@ -162,7 +162,7 @@ func (a *API) scaffolderChat(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(lower, "outline") || strings.Contains(instruction, "目录") || strings.Contains(instruction, "大纲") {
 		operation = generation.OperationOutline
 	}
-	result, err := a.generator.Generate(r.Context(), generation.Request{Operation: operation, ProjectType: string(projectItem.Type), Instruction: instruction, ProjectID: projectItem.ID})
+	result, err := a.generator.Generate(r.Context(), generation.Request{Operation: operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), Instruction: instruction, ProjectID: projectItem.ID})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "GENERATION_FAILED", err.Error())
 		return
@@ -381,7 +381,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						return
 					}
 				}
-				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction + "\n当前内容节点：" + node.Title, Evidence: evidence})
+				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction + "\n当前内容节点：" + node.Title, Evidence: evidence})
 				if generateErr != nil {
 					errorsChannel <- generateErr
 					return
@@ -642,7 +642,7 @@ func (a *API) createMemoryExtractionTask(w http.ResponseWriter, r *http.Request)
 	content := versions[0].Content
 	item := a.tasks.Create(projectItem.ID, "MEMORY_EXTRACT", func(ctx context.Context, progress func(int, string)) (any, error) {
 		progress(20, "正在识别人物、地点、时间线、剧情和伏笔")
-		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationMemory, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: "从《" + doc.Title + "》中提取需要跨章节保持一致的长期记忆", Content: content})
+		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationMemory, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: "从《" + doc.Title + "》中提取需要跨章节保持一致的长期记忆", Content: content})
 		if generateErr != nil {
 			return nil, generateErr
 		}
@@ -720,7 +720,7 @@ func (a *API) createFactExtractionTask(w http.ResponseWriter, r *http.Request) {
 	}
 	item := a.tasks.Create(projectItem.ID, "FACT_EXTRACT", func(ctx context.Context, progress func(int, string)) (any, error) {
 		progress(20, "Extractor 正在抽取结构化事实")
-		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationExtract, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: "抽取正文中的明确事实", Content: input.Content})
+		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationExtract, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: "抽取正文中的明确事实", Content: input.Content})
 		if generateErr != nil {
 			return nil, generateErr
 		}
@@ -937,7 +937,7 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "model is not configured for "+string(input.Operation))
 		return
 	}
-	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
+	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
 	request.Evidence = append(request.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
@@ -1193,6 +1193,19 @@ func (a *API) projectTypes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) contentTypePrompt(ctx context.Context, code project.Type) string {
+	items, err := a.store.ListContentTypes(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, item := range items {
+		if item.Code == code {
+			return item.Prompt
+		}
+	}
+	return ""
 }
 
 func (a *API) createProjectType(w http.ResponseWriter, r *http.Request) {

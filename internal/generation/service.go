@@ -31,6 +31,7 @@ func (o Operation) Valid() bool {
 type Request struct {
 	Operation   Operation  `json:"operation"`
 	ProjectType string     `json:"projectType"`
+	TypePrompt  string     `json:"typePrompt,omitempty"`
 	Instruction string     `json:"instruction"`
 	Content     string     `json:"content,omitempty"`
 	Evidence    []Evidence `json:"evidence,omitempty"`
@@ -87,6 +88,9 @@ func (s Service) Generate(ctx context.Context, request Request) (Result, error) 
 		return Result{}, err
 	}
 	system += "\n项目类型：" + request.ProjectType
+	if typePrompt := strings.TrimSpace(request.TypePrompt); typePrompt != "" {
+		system += "\n\n当前内容类型的创作规范（适用于本次及后续文档生成）：\n" + typePrompt
+	}
 	messages := []llm.Message{{Role: "system", Content: system}}
 	contextText, evidenceIDs := buildContext(request.Evidence)
 	userPrompt := "创作要求：\n" + request.Instruction

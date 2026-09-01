@@ -194,7 +194,7 @@ func (s *MemoryStore) ListContentTypes(_ context.Context) ([]ContentType, error)
 	return items, nil
 }
 
-func NormalizeContentType(code Type, name, icon, accent, description string) (ContentType, error) {
+func NormalizeContentType(code Type, name, icon, accent, description, prompt string) (ContentType, error) {
 	code = Type(strings.ToUpper(strings.TrimSpace(string(code))))
 	name, icon, accent = strings.TrimSpace(name), strings.TrimSpace(icon), strings.ToLower(strings.TrimSpace(accent))
 	if code == "" || name == "" {
@@ -208,17 +208,20 @@ func NormalizeContentType(code Type, name, icon, accent, description string) (Co
 	if len(code) > 40 || len(name) > 80 {
 		return ContentType{}, errors.New("code or name is too long")
 	}
+	if len(prompt) > 12000 {
+		return ContentType{}, errors.New("prompt is too long")
+	}
 	if icon == "" {
 		icon = string([]rune(name)[0])
 	}
 	if accent == "" {
 		accent = "amber"
 	}
-	return ContentType{Code: code, Name: name, Icon: icon, Accent: accent, Description: strings.TrimSpace(description)}, nil
+	return ContentType{Code: code, Name: name, Icon: icon, Accent: accent, Description: strings.TrimSpace(description), Prompt: strings.TrimSpace(prompt)}, nil
 }
 
 func (s *MemoryStore) CreateContentType(_ context.Context, input CreateContentTypeInput) (ContentType, error) {
-	item, err := NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description)
+	item, err := NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
 	if err != nil {
 		return ContentType{}, err
 	}
@@ -240,7 +243,7 @@ func (s *MemoryStore) UpdateContentType(_ context.Context, code Type, input Upda
 	if !ok {
 		return ContentType{}, ErrContentTypeNotFound
 	}
-	item, err := NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description)
+	item, err := NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
 	if err != nil {
 		return ContentType{}, err
 	}
@@ -266,7 +269,12 @@ func (s *MemoryStore) DeleteContentType(_ context.Context, code Type) error {
 
 func (s *MemoryStore) seedContentTypes() {
 	now := time.Now().UTC()
-	items := []ContentType{{Code: TypeNovel, Name: "小说", Icon: "文", Accent: "amber", Description: "小说与长篇叙事"}, {Code: TypeMovieCommentary, Name: "电影解说", Icon: "映", Accent: "blue", Description: "电影、剧集解说稿"}, {Code: TypeTechnicalDocument, Name: "技术文档", Icon: "术", Accent: "green", Description: "产品与技术资料"}}
+	items := []ContentType{
+		{Code: TypeNovel, Name: "小说", Icon: "文", Accent: "amber", Description: "小说与长篇叙事", Prompt: "以小说创作规范完成任务。重视人物弧光、叙事视角、场景调度、冲突递进、伏笔回收和跨章节连续性；目录使用卷、章等叙事层级，正文保持文学性与可读性，避免提纲腔和重复说明。"},
+		{Code: TypeMovieCommentary, Name: "电影解说", Icon: "映", Accent: "blue", Description: "电影解说与影评口播稿", Prompt: "以电影解说口播规范完成任务。围绕单部电影的完整叙事组织开场钩子、剧情推进、关键转折、主题解读与结尾收束；语言口语化、节奏紧凑，明确区分影片事实与评论，不虚构镜头、台词或幕后资料。"},
+		{Code: TypeTVCommentary, Name: "电视剧解说", Icon: "剧", Accent: "violet", Description: "电视剧、网剧与连续剧分集解说稿", Prompt: "以电视剧解说口播规范完成任务。目录和正文应体现季、集或剧情单元，持续维护人物关系、时间线、多线剧情、前情承接与集尾悬念；语言口语化且适合连续更新，避免跨集剧透错位，不虚构剧情、台词或集数信息。"},
+		{Code: TypeTechnicalDocument, Name: "技术文档", Icon: "术", Accent: "green", Description: "产品与技术资料", Prompt: "以技术文档规范完成任务。优先保证事实准确、术语一致、结构清晰和步骤可执行；明确前置条件、输入输出、限制、错误处理与示例，依据资料给出结论，不臆造接口、参数、版本或测试结果。"},
+	}
 	for index := range items {
 		items[index].CreatedAt = now.Add(time.Duration(index) * time.Microsecond)
 		items[index].UpdatedAt = items[index].CreatedAt

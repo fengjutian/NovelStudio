@@ -169,7 +169,7 @@ func (s ProjectStore) Update(ctx context.Context, id string, input project.Updat
 }
 
 func (s ProjectStore) ListContentTypes(ctx context.Context) ([]project.ContentType, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT code,name,icon,accent,description,created_at,updated_at FROM content_types ORDER BY created_at,code`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT code,name,icon,accent,description,prompt,created_at,updated_at FROM content_types ORDER BY created_at,code`)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (s ProjectStore) ListContentTypes(ctx context.Context) ([]project.ContentTy
 	items := []project.ContentType{}
 	for rows.Next() {
 		var item project.ContentType
-		if err := rows.Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.Prompt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -186,22 +186,22 @@ func (s ProjectStore) ListContentTypes(ctx context.Context) ([]project.ContentTy
 }
 
 func (s ProjectStore) CreateContentType(ctx context.Context, input project.CreateContentTypeInput) (project.ContentType, error) {
-	item, err := project.NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description)
+	item, err := project.NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
 	if err != nil {
 		return project.ContentType{}, err
 	}
 	now := time.Now().UTC()
 	item.CreatedAt, item.UpdatedAt = now, now
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO content_types(code,name,icon,accent,description,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, item.Code, item.Name, item.Icon, item.Accent, item.Description, now, now)
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO content_types(code,name,icon,accent,description,prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, item.Code, item.Name, item.Icon, item.Accent, item.Description, item.Prompt, now, now)
 	return item, err
 }
 
 func (s ProjectStore) UpdateContentType(ctx context.Context, code project.Type, input project.UpdateContentTypeInput) (project.ContentType, error) {
-	item, err := project.NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description)
+	item, err := project.NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
 	if err != nil {
 		return project.ContentType{}, err
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE content_types SET name=?,icon=?,accent=?,description=?,updated_at=? WHERE code=?`, item.Name, item.Icon, item.Accent, item.Description, time.Now().UTC(), code)
+	result, err := s.DB.ExecContext(ctx, `UPDATE content_types SET name=?,icon=?,accent=?,description=?,prompt=?,updated_at=? WHERE code=?`, item.Name, item.Icon, item.Accent, item.Description, item.Prompt, time.Now().UTC(), code)
 	if err != nil {
 		return project.ContentType{}, err
 	}
@@ -209,7 +209,7 @@ func (s ProjectStore) UpdateContentType(ctx context.Context, code project.Type, 
 	if count == 0 {
 		return project.ContentType{}, project.ErrContentTypeNotFound
 	}
-	err = s.DB.QueryRowContext(ctx, `SELECT code,name,icon,accent,description,created_at,updated_at FROM content_types WHERE code=?`, code).Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.CreatedAt, &item.UpdatedAt)
+	err = s.DB.QueryRowContext(ctx, `SELECT code,name,icon,accent,description,prompt,created_at,updated_at FROM content_types WHERE code=?`, code).Scan(&item.Code, &item.Name, &item.Icon, &item.Accent, &item.Description, &item.Prompt, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
 

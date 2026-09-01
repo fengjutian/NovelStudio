@@ -1,0 +1,5 @@
+ALTER TABLE content_types ADD COLUMN prompt TEXT NOT NULL AFTER description;
+UPDATE content_types SET description='小说与长篇叙事',prompt='以小说创作规范完成任务。重视人物弧光、叙事视角、场景调度、冲突递进、伏笔回收和跨章节连续性；目录使用卷、章等叙事层级，正文保持文学性与可读性，避免提纲腔和重复说明。' WHERE code='NOVEL';
+UPDATE content_types SET description='电影解说与影评口播稿',prompt='以电影解说口播规范完成任务。围绕单部电影的完整叙事组织开场钩子、剧情推进、关键转折、主题解读与结尾收束；语言口语化、节奏紧凑，明确区分影片事实与评论，不虚构镜头、台词或幕后资料。' WHERE code='MOVIE_COMMENTARY';
+UPDATE content_types SET description='技术文档与产品资料',prompt='以技术文档规范完成任务。优先保证事实准确、术语一致、结构清晰和步骤可执行；明确前置条件、输入输出、限制、错误处理与示例，依据资料给出结论，不臆造接口、参数、版本或测试结果。' WHERE code='TECHNICAL_DOCUMENT';
+INSERT INTO content_types(code,name,icon,accent,description,prompt,created_at,updated_at) VALUES ('TV_COMMENTARY','电视剧解说','剧','violet','电视剧、网剧与连续剧分集解说稿','以电视剧解说口播规范完成任务。目录和正文应体现季、集或剧情单元，持续维护人物关系、时间线、多线剧情、前情承接与集尾悬念；语言口语化且适合连续更新，避免跨集剧透错位，不虚构剧情、台词或集数信息。',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE name=VALUES(name),icon=VALUES(icon),accent=VALUES(accent),description=VALUES(description),prompt=VALUES(prompt),updated_at=VALUES(updated_at);

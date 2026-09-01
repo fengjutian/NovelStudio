@@ -6,6 +6,7 @@ export interface ContentType {
   icon: string
   accent: string
   description: string
+  prompt: string
   createdAt: string
   updatedAt: string
 }

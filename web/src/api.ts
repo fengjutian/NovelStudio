@@ -21,8 +21,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   projects: () => request<ProjectList>('/api/v1/projects'),
   contentTypes:()=>request<{items:ContentType[];total:number}>('/api/v1/project-types'),
-  createContentType:(input:{code:string;name:string;icon:string;accent:string;description:string})=>request<ContentType>('/api/v1/project-types',{method:'POST',body:JSON.stringify(input)}),
-  updateContentType:(code:string,input:{name:string;icon:string;accent:string;description:string})=>request<ContentType>(`/api/v1/project-types/${encodeURIComponent(code)}`,{method:'PUT',body:JSON.stringify(input)}),
+  createContentType:(input:{code:string;name:string;icon:string;accent:string;description:string;prompt:string})=>request<ContentType>('/api/v1/project-types',{method:'POST',body:JSON.stringify(input)}),
+  updateContentType:(code:string,input:{name:string;icon:string;accent:string;description:string;prompt:string})=>request<ContentType>(`/api/v1/project-types/${encodeURIComponent(code)}`,{method:'PUT',body:JSON.stringify(input)}),
   deleteContentType:(code:string)=>request<void>(`/api/v1/project-types/${encodeURIComponent(code)}`,{method:'DELETE'}),
   dashboardStats:()=>request<{projects:number;documents:number;knowledgeSources:number;pendingIssues:number;runningTasks:number;averageQualityScore:number}>('/api/v1/dashboard/stats'),
   createProject: (input: { name: string; type: ProjectType; description: string }) =>

@@ -7,6 +7,7 @@ type Type string
 const (
 	TypeNovel             Type = "NOVEL"
 	TypeMovieCommentary   Type = "MOVIE_COMMENTARY"
+	TypeTVCommentary      Type = "TV_COMMENTARY"
 	TypeTechnicalDocument Type = "TECHNICAL_DOCUMENT"
 )
 
@@ -20,6 +21,7 @@ type ContentType struct {
 	Icon        string    `json:"icon"`
 	Accent      string    `json:"accent"`
 	Description string    `json:"description"`
+	Prompt      string    `json:"prompt"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -30,6 +32,7 @@ type CreateContentTypeInput struct {
 	Icon        string `json:"icon"`
 	Accent      string `json:"accent"`
 	Description string `json:"description"`
+	Prompt      string `json:"prompt"`
 }
 
 type UpdateContentTypeInput struct {
@@ -37,6 +40,7 @@ type UpdateContentTypeInput struct {
 	Icon        string `json:"icon"`
 	Accent      string `json:"accent"`
 	Description string `json:"description"`
+	Prompt      string `json:"prompt"`
 }
 
 type Project struct {

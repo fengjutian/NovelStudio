@@ -22,10 +22,10 @@ const normalizeGeneratedOutline=(content:string)=>{
   return headings.length?headings.join('\n'):cleaned
 }
 
-type ChapterGeneratorDraft={requirement:string;outline:string;bookTitle:string;knowledgeQuery:string;splitMode:'LEAF'|'ALL';nodeIds:string[];documentsReady:boolean;selectionVersion:number}
+type ChapterGeneratorDraft={requirement:string;outline:string;knowledgeQuery:string;splitMode:'LEAF'|'ALL';nodeIds:string[];documentsReady:boolean;selectionVersion:number}
 const chapterDraftKey=(projectId:string)=>`novelstudio:chapter-generator:${projectId}`
 const loadChapterDraft=(project:Project):ChapterGeneratorDraft=>{
-  const fallback:ChapterGeneratorDraft={requirement:'',outline:'',bookTitle:project.name,knowledgeQuery:'',splitMode:'LEAF',nodeIds:[],documentsReady:false,selectionVersion:3}
+  const fallback:ChapterGeneratorDraft={requirement:'',outline:'',knowledgeQuery:'',splitMode:'LEAF',nodeIds:[],documentsReady:false,selectionVersion:3}
   try{
     const saved=localStorage.getItem(chapterDraftKey(project.id))
     if(!saved)return fallback
@@ -217,28 +217,31 @@ function ContentTypeManager(){
   const[icon,setIcon]=useState('')
   const[accent,setAccent]=useState('amber')
   const[description,setDescription]=useState('')
-  const reset=(item?:ContentType)=>{setEditing(item??null);setCode(item?.code??'');setName(item?.name??'');setIcon(item?.icon??'');setAccent(item?.accent??'amber');setDescription(item?.description??'');setOpen(true)}
-  const save=useMutation({mutationFn:()=>editing?api.updateContentType(editing.code,{name,icon,accent,description}):api.createContentType({code,name,icon,accent,description}),onSuccess:()=>{toast.success(editing?'内容类型已更新':'内容类型已创建');setOpen(false);queryClient.invalidateQueries({queryKey:['content-types']});queryClient.invalidateQueries({queryKey:['projects']})}})
+  const[prompt,setPrompt]=useState('')
+  const reset=(item?:ContentType)=>{setEditing(item??null);setCode(item?.code??'');setName(item?.name??'');setIcon(item?.icon??'');setAccent(item?.accent??'amber');setDescription(item?.description??'');setPrompt(item?.prompt??'');setOpen(true)}
+  const save=useMutation({mutationFn:()=>editing?api.updateContentType(editing.code,{name,icon,accent,description,prompt}):api.createContentType({code,name,icon,accent,description,prompt}),onSuccess:()=>{toast.success(editing?'内容类型已更新':'内容类型已创建');setOpen(false);queryClient.invalidateQueries({queryKey:['content-types']});queryClient.invalidateQueries({queryKey:['projects']})}})
   const remove=useMutation({mutationFn:api.deleteContentType,onSuccess:()=>{toast.success('内容类型已删除');queryClient.invalidateQueries({queryKey:['content-types']})},onError:error=>toast.error(error.message)})
   const submit=(event:FormEvent)=>{event.preventDefault();save.mutate()}
   return <>
-    <header><div><p className="eyebrow">CONTENT TYPES</p><h1>内容类型</h1><p>维护项目可选择的内容类型、显示名称和视觉标识，不再由程序写死。</p></div><Button className="primary" onClick={()=>reset()}><Plus size={16}/>新增类型</Button></header>
-    <section className="type-manager-head"><div><strong>{types.data?.total??0}</strong><span>个可用类型</span></div><p>类型编码用于提示词和数据关联，创建后不可修改；名称、图标、配色和说明可以随时编辑。</p></section>
+    <header><div><p className="eyebrow">CONTENT TYPES</p><h1>内容类型</h1><p>维护项目可选择的内容类型、视觉标识和贯穿文档生成流程的创作提示词。</p></div><Button className="primary" onClick={()=>reset()}><Plus size={16}/>新增类型</Button></header>
+    <section className="type-manager-head"><div><strong>{types.data?.total??0}</strong><span>个可用类型</span></div><p>类型编码用于提示词和数据关联，创建后不可修改；生成提示词会自动应用于目录、正文及后续 AI 文档任务。</p></section>
     <section className="content-type-grid">
       {types.data?.items.map(item=><article key={item.code}>
         <div className={`project-icon ${item.accent}`}>{item.icon}</div>
         <div className="content-type-title"><h2>{item.name}</h2><code>{item.code}</code></div>
         <p>{item.description||'尚未填写类型说明'}</p>
+        <div className={`type-prompt-status ${item.prompt?'configured':'empty'}`}><Sparkles size={13}/>{item.prompt?'已配置生成提示词':'未配置生成提示词'}</div>
         <footer><button onClick={()=>reset(item)}><Pencil size={14}/>编辑</button><button className="danger" disabled={remove.isPending} onClick={()=>window.confirm(`确定删除“${item.name}”？已被项目使用时将无法删除。`)&&remove.mutate(item.code)}><Trash2 size={14}/>删除</button></footer>
       </article>)}
       {!types.isLoading&&types.data?.total===0&&<div className="file-empty"><Shapes/><strong>暂无内容类型</strong><span>新增一个类型后即可创建项目</span></div>}
     </section>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="dialog content-type-dialog"><form onSubmit={submit}>
-      <DialogHeader className="content-type-dialog-head"><DialogTitle>{editing?'编辑内容类型':'新增内容类型'}</DialogTitle><DialogDescription>配置新建项目时显示的类型信息。</DialogDescription></DialogHeader>
+      <DialogHeader className="content-type-dialog-head"><DialogTitle>{editing?'编辑内容类型':'新增内容类型'}</DialogTitle><DialogDescription>配置类型信息和后续目录、正文等 AI 文档任务共同使用的创作提示词。</DialogDescription></DialogHeader>
       <div className="type-form-row"><label>类型名称<Input required maxLength={80} value={name} onChange={event=>setName(event.target.value)} placeholder="例如：营销文案"/></label><label>图标文字<Input maxLength={4} value={icon} onChange={event=>setIcon(event.target.value)} placeholder="例如：营"/></label></div>
       <label>类型编码<Input required disabled={!!editing} maxLength={40} value={code} onChange={event=>setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,''))} placeholder="例如：MARKETING_COPY"/></label>
       <label>配色<Select value={accent} onChange={event=>setAccent(event.target.value)}><option value="amber">琥珀色</option><option value="blue">蓝色</option><option value="green">绿色</option><option value="rose">玫红色</option><option value="violet">紫色</option></Select></label>
       <label>类型说明<textarea rows={3} maxLength={500} value={description} onChange={event=>setDescription(event.target.value)} placeholder="说明适用的内容场景"/></label>
+      <label>生成提示词<textarea required rows={8} maxLength={12000} value={prompt} onChange={event=>setPrompt(event.target.value)} placeholder="描述该内容类型的结构、风格、事实边界、质量要求和必须遵守的规则"/><small>作为系统级类型规范，自动用于创作简报、目录、正文、润色、修复、事实抽取和长期记忆。</small></label>
       {save.isError&&<p className="form-error">{save.error.message}</p>}
       <div className="dialog-actions"><button type="button" className="secondary" onClick={()=>setOpen(false)}>取消</button><button className="primary" disabled={save.isPending}>{save.isPending?'保存中…':'保存'}</button></div>
     </form></DialogContent></Dialog>
@@ -415,7 +418,7 @@ function LegacyChapterDocumentGenerator({project,modelReady,onOpenWorkspace}:{pr
   const draftProjectId=useRef(project.id)
   const[requirement,setRequirement]=useState(initialDraft.requirement)
   const[outline,setOutline]=useState(initialDraft.outline)
-  const[bookTitle,setBookTitle]=useState(initialDraft.bookTitle)
+  const bookTitle=project.name
   const[knowledgeQuery,setKnowledgeQuery]=useState(initialDraft.knowledgeQuery)
   const[splitMode,setSplitMode]=useState<'LEAF'|'ALL'>(initialDraft.splitMode)
   const[outlineTaskId,setOutlineTaskId]=useState('')
@@ -428,12 +431,12 @@ function LegacyChapterDocumentGenerator({project,modelReady,onOpenWorkspace}:{pr
   const notifiedAssistTask=useRef('')
   useEffect(()=>{
     if(draftProjectId.current!==project.id)return
-    try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds,documentsReady,selectionVersion:3} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}
-  },[project.id,requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds,documentsReady])
+    try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,knowledgeQuery,splitMode,nodeIds,documentsReady,selectionVersion:3} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}
+  },[project.id,requirement,outline,knowledgeQuery,splitMode,nodeIds,documentsReady])
   useEffect(()=>{
     if(draftProjectId.current===project.id)return
     const draft=loadChapterDraft(project)
-    setRequirement(draft.requirement);setOutline(draft.outline);setBookTitle(draft.bookTitle);setKnowledgeQuery(draft.knowledgeQuery);setSplitMode(draft.splitMode);setNodeIds(draft.nodeIds);setDocumentsReady(draft.documentsReady)
+    setRequirement(draft.requirement);setOutline(draft.outline);setKnowledgeQuery(draft.knowledgeQuery);setSplitMode(draft.splitMode);setNodeIds(draft.nodeIds);setDocumentsReady(draft.documentsReady)
     setOutlineTaskId('');setAssistTaskId('');appliedTask.current='';draftProjectId.current=project.id
   },[project])
   const outlineTask=useQuery({queryKey:['chapter-outline-task',outlineTaskId],queryFn:()=>api.task<GenerationResult>(outlineTaskId),enabled:Boolean(outlineTaskId),refetchInterval:q=>['SUCCESS','FAILED','CANCELLED'].includes(q.state.data?.status??'')?false:1000})
@@ -451,7 +454,7 @@ function LegacyChapterDocumentGenerator({project,modelReady,onOpenWorkspace}:{pr
   },[assistTask.data?.status,assistTask.data?.error,assistTaskId])
   const generateOutline=useMutation({mutationFn:()=>api.createGenerationTask(project.id,{operation:'OUTLINE',instruction:outline?`依据写作需求扩写并优化现有 Markdown 目录。只保留一级作品标题和二级真实章节标题，不要输出章节目标、核心要点、所需证据、预计篇幅等说明项。\n写作需求：${requirement}`:`为《${bookTitle}》生成 Markdown 章节目录。一级标题为作品名，二级标题为真实章节；不要输出三级标题或规划说明。\n写作需求：${requirement}`,title:`${bookTitle}目录`,documentId:'',knowledgeQuery,content:outline,save:false}),onSuccess:task=>{appliedTask.current='';setOutlineTaskId(task.id);setNodeIds([]);setDocumentsReady(false)}})
   useEffect(()=>{const generated=outlineTask.data?.result?.generation.content;if(generated&&appliedTask.current!==outlineTaskId){setOutline(normalizeGeneratedOutline(generated));appliedTask.current=outlineTaskId}},[outlineTask.data?.result,outlineTaskId])
-  const confirm=useMutation({mutationFn:async()=>{let selected:ContentNode[];if(nodeIds.length){const current=await api.tree(project.id);const byId=new Map(current.items.map(node=>[node.id,node]));const selectedIds=new Set(nodeIds);const previous=current.items.filter(node=>selectedIds.has(node.id));if(splitMode==='ALL')selected=previous;else{const chapters=new Map<string,ContentNode>();for(const item of previous){let node:ContentNode|undefined=item;while(node&&Number(node.metadata?.outlineLevel)>2&&node.parentId)node=byId.get(node.parentId);if(node&&Number(node.metadata?.outlineLevel)===2)chapters.set(node.id,node)}selected=[...chapters.values()]}}else{const data=await api.importOutline(project.id,{content:outline,preview:false});const nodes=data.items as ContentNode[];const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const chapters=nodes.filter(item=>Number(item.metadata?.outlineLevel)===2);selected=splitMode==='ALL'?nodes:chapters.length?chapters:nodes.filter(item=>!parents.has(item.id))}await ensureChapterDocuments(project.id,selected);return selected},onSuccess:selected=>{const confirmedIds=selected.map(item=>item.id);setNodeIds(confirmedIds);setDocumentsReady(true);try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,bookTitle,knowledgeQuery,splitMode,nodeIds:confirmedIds,documentsReady:true,selectionVersion:3} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}queryClient.invalidateQueries({queryKey:['tree',project.id]});queryClient.invalidateQueries({queryKey:['documents',project.id]});toast.success(`已准备 ${selected.length} 篇章节文档，已有正文保持不变`);onOpenWorkspace()}})
+  const confirm=useMutation({mutationFn:async()=>{let selected:ContentNode[];if(nodeIds.length){const current=await api.tree(project.id);const byId=new Map(current.items.map(node=>[node.id,node]));const selectedIds=new Set(nodeIds);const previous=current.items.filter(node=>selectedIds.has(node.id));if(splitMode==='ALL')selected=previous;else{const chapters=new Map<string,ContentNode>();for(const item of previous){let node:ContentNode|undefined=item;while(node&&Number(node.metadata?.outlineLevel)>2&&node.parentId)node=byId.get(node.parentId);if(node&&Number(node.metadata?.outlineLevel)===2)chapters.set(node.id,node)}selected=[...chapters.values()]}}else{const data=await api.importOutline(project.id,{content:outline,preview:false});const nodes=data.items as ContentNode[];const parents=new Set(nodes.map(item=>item.parentId).filter(Boolean));const chapters=nodes.filter(item=>Number(item.metadata?.outlineLevel)===2);selected=splitMode==='ALL'?nodes:chapters.length?chapters:nodes.filter(item=>!parents.has(item.id))}await ensureChapterDocuments(project.id,selected);return selected},onSuccess:selected=>{const confirmedIds=selected.map(item=>item.id);setNodeIds(confirmedIds);setDocumentsReady(true);try{localStorage.setItem(chapterDraftKey(project.id),JSON.stringify({requirement,outline,knowledgeQuery,splitMode,nodeIds:confirmedIds,documentsReady:true,selectionVersion:3} satisfies ChapterGeneratorDraft))}catch{/* Browser storage may be unavailable in private mode. */}queryClient.invalidateQueries({queryKey:['tree',project.id]});queryClient.invalidateQueries({queryKey:['documents',project.id]});toast.success(`已准备 ${selected.length} 篇章节文档，已有正文保持不变`);onOpenWorkspace()}})
   const running=outlineTask.data&&!['SUCCESS','FAILED','CANCELLED'].includes(outlineTask.data.status)
   const step=outline&&!running?3:running?2:1
   const outlineLines=outline.split('\n').filter(line=>/^#{1,6}\s+/.test(line.trim()))
@@ -473,13 +476,13 @@ function LegacyChapterDocumentGenerator({project,modelReady,onOpenWorkspace}:{pr
         {(generateOutline.isError||outlineTask.data?.status==='FAILED')&&<p className="quality-error">{generateOutline.error?.message||outlineTask.data?.error}</p>}
       </section>
       <section className="generator-main-card generator-flow-step" data-step="3">
-        <div className="outline-editor-head"><div><strong>步骤 3 · 修改并确认目录</strong><span>{outline?'校对层级和标题，确认后锁定生成范围':'等待生成目录，也可以直接粘贴已有目录'}</span></div>{outline&&<div className="outline-stats"><span>{outlineLines.length} 个条目</span><span>{chapterCount} 个章节</span></div>}<button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([]);setDocumentsReady(false)}}>清空</button></div>
+        <div className="generator-section-title outline-editor-head"><span><Sparkles/></span><div><p>步骤 3</p><h3>修改并确认目录</h3><small>{outline?'校对层级和标题，确认后锁定生成范围':'等待生成目录，也可以直接粘贴已有目录'}</small></div>{outline&&<div className="outline-stats"><span>{outlineLines.length} 个条目</span><span>{chapterCount} 个章节</span></div>}<button disabled={!outline} onClick={()=>{setOutline('');setNodeIds([]);setDocumentsReady(false)}}>清空</button></div>
         <textarea className="outline-markdown-editor" rows={14} value={outline} onChange={event=>{setOutline(event.target.value);setNodeIds([]);setDocumentsReady(false)}} placeholder={'# 第一部分\n## 第一章\n### 第一节'}/>
         <button className="secondary confirm-outline" disabled={confirm.isPending||(!nodeIds.length&&!outline.trim())} onClick={()=>documentsReady?onOpenWorkspace():confirm.mutate()}>{documentsReady?<><Check size={15}/> 已准备 {nodeIds.length} 篇章节文档 · 进入文档工作区</>:(confirm.isPending?'正在补齐章节文档…':nodeIds.length?'补齐文档并进入工作区':'确认目录并进入文档工作区')}</button>
         {confirm.isError&&<p className="quality-error">{confirm.error.message}</p>}
       </section>
     </div><aside className="generator-side">
-      <section className="generator-settings"><div className="side-section-title"><Settings2/><div><h3>输出设置</h3><p>决定正文如何拆分与引用资料</p></div></div><label>作品名称<Input value={bookTitle} onChange={event=>setBookTitle(event.target.value)}/></label><label>文档拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([]);setDocumentsReady(false)}}><option value="LEAF">每个二级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：人物、世界观或参考资料"/></label></section>
+      <section className="generator-settings"><div className="side-section-title"><Settings2/><div><h3>输出设置</h3><p>决定正文如何拆分与引用资料</p></div></div><label>作品名称<Input value={bookTitle} readOnly aria-readonly="true" title="作品名称与当前项目名称一致"/></label><label>文档拆分方式<Select value={splitMode} onChange={event=>{setSplitMode(event.target.value as 'LEAF'|'ALL');setNodeIds([]);setDocumentsReady(false)}}><option value="LEAF">每个二级章节一篇文档</option><option value="ALL">每个目录条目一篇文档</option></Select></label><label>知识库检索词<Input value={knowledgeQuery} onChange={event=>setKnowledgeQuery(event.target.value)} placeholder="可选：人物、世界观或参考资料"/></label></section>
     </aside></div>
     <Dialog open={assistOpen} onOpenChange={setAssistOpen}><DialogContent className="dialog ai-expand-dialog"><div className="ai-expand-content">
       <DialogHeader className="content-type-dialog-head"><DialogTitle>AI 助写创作简报</DialogTitle><DialogDescription>输入一句初步想法，AI 会补全题材、受众、风格、篇幅和创作要求，确认后才会写入需求框。</DialogDescription></DialogHeader>
@@ -536,7 +539,7 @@ function DocumentEditor({ document, onBack, embedded=false }: { document: Docume
   const [autoSave, setAutoSave] = useState(false)
   const [compareFrom, setCompareFrom] = useState('')
   const [editorMode,setEditorMode]=useState<'edit'|'preview'>('edit')
-  const [versionsCollapsed,setVersionsCollapsed]=useState(false)
+  const [versionsCollapsed,setVersionsCollapsed]=useState(true)
   const [selection,setSelection]=useState({start:0,end:0})
   const copilotRange=useRef({start:0,end:0})
   const [copilotTaskId,setCopilotTaskId]=useState('')
