@@ -49,6 +49,15 @@ func outlineNodeType(projectType Type, level int) string {
 		}
 		return "COMMENTARY_SEGMENT"
 	}
+	if projectType == TypeTVCommentary {
+		if level == 1 {
+			return "SEASON"
+		}
+		if level == 2 {
+			return "EPISODE"
+		}
+		return "COMMENTARY_SEGMENT"
+	}
 	if projectType == TypeTechnicalDocument {
 		if level == 1 {
 			return "MODULE"

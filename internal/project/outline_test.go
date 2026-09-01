@@ -21,3 +21,10 @@ func TestParseOutlineSupportsTechnicalDocuments(t *testing.T) {
 		t.Fatalf("unexpected items: %#v, %v", items, err)
 	}
 }
+
+func TestParseOutlineSupportsTVCommentary(t *testing.T) {
+	items, err := project.ParseOutline("# 第一季\n## 第一集\n### 开场", project.TypeTVCommentary)
+	if err != nil || len(items) != 3 || items[0].NodeType != "SEASON" || items[1].NodeType != "EPISODE" || items[2].NodeType != "COMMENTARY_SEGMENT" {
+		t.Fatalf("unexpected items: %#v, %v", items, err)
+	}
+}

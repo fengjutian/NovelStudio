@@ -133,6 +133,8 @@ func (s ProjectStore) Create(ctx context.Context, input project.CreateInput) (pr
 	rootType, childType := "SECTION", "CHAPTER"
 	if input.Type == project.TypeMovieCommentary {
 		rootType, childType = "ACT", "COMMENTARY_SEGMENT"
+	} else if input.Type == project.TypeTVCommentary {
+		rootType, childType = "SEASON", "EPISODE"
 	} else if input.Type == project.TypeTechnicalDocument {
 		rootType, childType = "MODULE", "SECTION"
 	}

@@ -766,7 +766,7 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "instruction is required")
 		return
 	}
-	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
+	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
 	genRequest.Evidence = append(genRequest.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
 	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {

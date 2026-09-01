@@ -317,6 +317,9 @@ func defaultTree(projectID string, projectType Type) []ContentNode {
 	if projectType == TypeMovieCommentary {
 		rootType, childType = "ACT", "COMMENTARY_SEGMENT"
 	}
+	if projectType == TypeTVCommentary {
+		rootType, childType = "SEASON", "EPISODE"
+	}
 	if projectType == TypeTechnicalDocument {
 		rootType, childType = "MODULE", "SECTION"
 	}
