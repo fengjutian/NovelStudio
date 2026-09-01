@@ -328,6 +328,16 @@ main{grid-column:2;width:auto;max-width:1440px;padding:56px clamp(34px,5vw,78px)
 
 /* Viewport scrolling: navigation chrome stays fixed; only the right content pane scrolls. */
 html,body,#root{height:100%;overflow:hidden}
+.auth-loading{display:grid;height:100%;place-items:center;background:#f5f1ea;color:#8b7d6d;font-size:13px}
+.auth-page{display:grid;grid-column:1/-1;width:100%;max-width:none;height:100%;min-height:100vh;padding:0;grid-template-columns:minmax(360px,1.05fr) minmax(420px,.95fr);background:#f7f3ed}
+.auth-hero{position:relative;display:flex;overflow:hidden;flex-direction:column;justify-content:center;padding:clamp(48px,8vw,120px);background:linear-gradient(145deg,#211d19,#3b2d20);color:#fff}
+.auth-hero:after{position:absolute;right:-140px;bottom:-170px;width:430px;height:430px;border:1px solid rgba(222,170,104,.18);border-radius:50%;box-shadow:0 0 0 65px rgba(222,170,104,.035),0 0 0 130px rgba(222,170,104,.025);content:''}
+.auth-mark{display:grid;width:52px;height:52px;margin-bottom:46px;place-items:center;border:1px solid rgba(255,255,255,.24);border-radius:14px;background:#b8752d;color:#fff8ed;font:700 24px 'Noto Serif SC'}
+.auth-hero p{margin:0 0 18px;color:#d49b5e;font-size:10px;font-weight:700;letter-spacing:3px}.auth-hero h1{z-index:1;margin:0;font:700 clamp(31px,4vw,52px)/1.35 'Noto Serif SC';letter-spacing:1px}.auth-hero span{z-index:1;margin-top:25px;color:#bdb2a7;font-size:13px;letter-spacing:.5px}
+.auth-panel{display:grid;place-items:center;padding:38px}.auth-card{display:grid;width:min(100%,400px);height:590px;align-content:start;gap:17px;padding:38px;border:1px solid #e0d8cd;border-radius:18px;background:#fffdf9;box-shadow:0 24px 70px rgba(70,52,32,.09)}
+.auth-card>header{display:grid;justify-content:normal;align-items:initial;gap:0;margin:0}.auth-card header p{margin:0;color:#b8752d;font-size:9px;font-weight:800;letter-spacing:2px}.auth-card header h2{margin:7px 0 5px;font:700 25px 'Noto Serif SC';color:#332d27}.auth-card header span{color:#91877c;font-size:11px}.auth-tabs{display:grid;grid-template-columns:1fr 1fr;padding:3px;border-radius:9px;background:#f1ece5}.auth-tabs button{height:35px;border:0;border-radius:7px;background:transparent;color:#887d70;font-size:11px}.auth-tabs button.active{background:#fff;color:#7f4b18;font-weight:700;box-shadow:0 2px 8px rgba(60,45,27,.09)}
+.auth-card label{display:grid;gap:7px;color:#625a51;font-size:10px;font-weight:700}.auth-card input{height:44px;background:#fff}.auth-submit{height:44px;margin-top:3px}.auth-card>small{text-align:center;color:#aaa095;font-size:8px}.auth-error{margin:0;padding:9px 11px;border-radius:7px;background:#fff0ed;color:#a64134;font-size:10px;line-height:1.45}
+@media(max-width:800px){.auth-page{grid-template-columns:1fr;overflow-y:auto}.auth-hero{min-height:230px;padding:34px}.auth-mark{width:42px;height:42px;margin-bottom:22px}.auth-hero h1{font-size:27px}.auth-panel{padding:22px}.auth-card{height:auto;min-height:540px;padding:28px 24px}}
 @media(min-width:761px){
   .shell{height:100vh;min-height:0;overflow:hidden}
   .shell>main{display:grid;height:100vh;min-width:0;min-height:0;grid-template-rows:58px minmax(0,1fr);padding:0;overflow:hidden}

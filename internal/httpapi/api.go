@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"novelstudio/internal/airun"
+	"novelstudio/internal/auth"
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/knowledge"
@@ -44,6 +45,7 @@ type API struct {
 	runs        airun.Recorder
 	quality     qualityhistory.Store
 	modelConfig modelconfig.Store
+	auth        auth.Store
 }
 
 func New(store project.Store, logger *slog.Logger) http.Handler {
@@ -62,6 +64,12 @@ func NewWithServices(store project.Store, docs document.Store, knowledgeStore kn
 	return NewWithRuntime(store, docs, knowledgeStore, pipeline, generator, task.NewManager(), nil, nil, logger)
 }
 func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, logger *slog.Logger) http.Handler {
+	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, nil, logger)
+}
+func NewWithRuntimeAuth(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, logger *slog.Logger) http.Handler {
+	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, authStore, logger)
+}
+func newWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, logger *slog.Logger) http.Handler {
 	if tasks == nil {
 		tasks = task.NewManager()
 	}
@@ -69,9 +77,13 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	if configPath == "" {
 		configPath = filepath.Join(".local", "model-config.json")
 	}
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, modelConfig: modelconfig.Store{Path: configPath}, logger: logger}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, auth: authStore, modelConfig: modelconfig.Store{Path: configPath}, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("POST /api/v1/auth/register", a.register)
+	mux.HandleFunc("POST /api/v1/auth/login", a.login)
+	mux.HandleFunc("POST /api/v1/auth/logout", a.logout)
+	mux.HandleFunc("GET /api/v1/auth/me", a.me)
 	mux.HandleFunc("GET /api/v1/project-types", a.projectTypes)
 	mux.HandleFunc("POST /api/v1/project-types", a.createProjectType)
 	mux.HandleFunc("PUT /api/v1/project-types/{code}", a.updateProjectType)
@@ -128,7 +140,11 @@ func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.cancelTask)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/retry", a.retryTask)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
-	return recoverer(logger, requestLogger(logger, cors(mux)))
+	var handler http.Handler = mux
+	if authStore != nil {
+		handler = a.requireAuth(handler)
+	}
+	return recoverer(logger, requestLogger(logger, cors(handler)))
 }
 
 func (a *API) scaffolderChat(w http.ResponseWriter, r *http.Request) {

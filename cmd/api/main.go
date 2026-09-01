@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"novelstudio/internal/airun"
+	"novelstudio/internal/auth"
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/httpapi"
@@ -30,7 +31,7 @@ func main() {
 	loadEnvFile(".env")
 	addr := env("HTTP_ADDR", ":8080")
 	applyLocalModelConfig()
-	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, taskManager, closeStore := stores()
+	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
 	defer closeStore()
 	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "15m")); err == nil && timeout > 0 {
 		taskManager.SetTimeout(timeout)
@@ -39,7 +40,7 @@ func main() {
 	}
 	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)
-	handler := httpapi.NewWithRuntime(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, slog.Default())
+	handler := httpapi.NewWithRuntimeAuth(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, authStore, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
@@ -197,11 +198,11 @@ func modelRequestTimeout() time.Duration {
 	return timeout
 }
 
-func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, *task.Manager, func()) {
+func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, auth.Store, *task.Manager, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
 		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
-		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), qualityhistory.NewMemoryStore(), task.NewManager(), func() {}
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), qualityhistory.NewMemoryStore(), auth.NewMemoryStore(), task.NewManager(), func() {}
 	}
 	db, err := mysqlstore.Open(context.Background(), dsn)
 	if err != nil {
@@ -214,7 +215,7 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, q
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, mysqlstore.AuthStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
 func validationPipeline(recorder airun.Recorder) *validation.Pipeline {

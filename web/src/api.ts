@@ -18,7 +18,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : response.json()
 }
 
+export type AuthUser={id:string;name:string;email:string;createdAt:string}
+
 export const api = {
+  me:()=>request<{user:AuthUser}>('/api/v1/auth/me'),
+  register:(input:{name:string;email:string;password:string})=>request<{user:AuthUser}>('/api/v1/auth/register',{method:'POST',body:JSON.stringify(input)}),
+  login:(input:{email:string;password:string})=>request<{user:AuthUser}>('/api/v1/auth/login',{method:'POST',body:JSON.stringify(input)}),
+  logout:()=>request<void>('/api/v1/auth/logout',{method:'POST'}),
   projects: () => request<ProjectList>('/api/v1/projects'),
   contentTypes:()=>request<{items:ContentType[];total:number}>('/api/v1/project-types'),
   createContentType:(input:{code:string;name:string;icon:string;accent:string;description:string;prompt:string})=>request<ContentType>('/api/v1/project-types',{method:'POST',body:JSON.stringify(input)}),

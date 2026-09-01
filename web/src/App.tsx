@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import type {AuthUser} from './api'
 import {ArrowLeft,ArrowRight,Bell,Check,ChevronDown,ChevronLeft,ChevronRight,CircleGauge,Clock3,Database,Download,FileImage,FileText,Home,MoreHorizontal,Pencil,Plus,Search,Settings2,Shapes,Sparkles,Trash2,Upload} from 'lucide-react'
 import {Toaster,toast} from 'sonner'
 import {MarkdownEditor} from './components/MarkdownEditor'
@@ -35,8 +36,34 @@ const loadChapterDraft=(project:Project):ChapterGeneratorDraft=>{
   }catch{return fallback}
 }
 
+function AuthScreen({onAuthenticated}:{onAuthenticated:(user:AuthUser)=>void}){
+  const [mode,setMode]=useState<'login'|'register'>('login')
+  const [name,setName]=useState('')
+  const [email,setEmail]=useState('')
+  const [password,setPassword]=useState('')
+  const authMutation=useMutation({
+    mutationFn:()=>mode==='login'?api.login({email,password}):api.register({name,email,password}),
+    onSuccess:({user})=>onAuthenticated(user),
+  })
+  const switchMode=(next:'login'|'register')=>{setMode(next);authMutation.reset()}
+  return <main className="auth-page">
+    <section className="auth-hero"><div className="auth-mark">字</div><p>CONTENT STUDIO</p><h1>让每一个长篇构想，<br/>都有清晰的创作路径。</h1><span>知识、结构与 AI 协作的一体化内容工作台。</span></section>
+    <section className="auth-panel"><form className="auth-card" onSubmit={(event)=>{event.preventDefault();authMutation.mutate()}}>
+      <header><p>欢迎使用</p><h2>{mode==='login'?'登录你的工作区':'创建创作账号'}</h2><span>{mode==='login'?'继续管理你的项目与灵感。':'只需一分钟，即可开始创作。'}</span></header>
+      <div className="auth-tabs"><button type="button" className={mode==='login'?'active':''} onClick={()=>switchMode('login')}>登录</button><button type="button" className={mode==='register'?'active':''} onClick={()=>switchMode('register')}>注册</button></div>
+      {mode==='register'&&<label>昵称<Input autoFocus required minLength={2} maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder="你的创作昵称"/></label>}
+      <label>邮箱<Input autoFocus={mode==='login'} required type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com"/></label>
+      <label>密码<Input required type="password" minLength={8} maxLength={128} autoComplete={mode==='login'?'current-password':'new-password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="至少 8 位字符"/></label>
+      {authMutation.isError&&<p className="auth-error">{authMutation.error.message}</p>}
+      <Button className="primary auth-submit" disabled={authMutation.isPending}>{authMutation.isPending?'请稍候…':mode==='login'?'登录':'注册并进入'}</Button>
+      <small>登录即表示你同意妥善保管自己的账号信息。</small>
+    </form></section>
+  </main>
+}
+
 export function App() {
   const queryClient = useQueryClient()
+  const session=useQuery({queryKey:['session'],queryFn:api.me,retry:false,staleTime:60_000})
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -48,10 +75,12 @@ export function App() {
   const [selectedTab, setSelectedTab] = useState<WorkspaceTab>('documents')
   const [activeNav, setActiveNav] = useState<'projects' | 'knowledge' | 'types' | 'tasks' | 'models'>('projects')
   const [projectQuery, setProjectQuery] = useState('')
-  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects })
-  const contentTypes=useQuery({queryKey:['content-types'],queryFn:api.contentTypes})
+  const signedIn=Boolean(session.data?.user)
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects,enabled:signedIn })
+  const contentTypes=useQuery({queryKey:['content-types'],queryFn:api.contentTypes,enabled:signedIn})
   useEffect(()=>{if(contentTypes.data?.items.length&&!contentTypes.data.items.some(item=>item.code===type))setType(contentTypes.data.items[0].code)},[contentTypes.data,type])
-  const dashboard=useQuery({queryKey:['dashboard-stats'],queryFn:api.dashboardStats,refetchInterval:10000})
+  const dashboard=useQuery({queryKey:['dashboard-stats'],queryFn:api.dashboardStats,refetchInterval:10000,enabled:signedIn})
+  const logout=useMutation({mutationFn:api.logout,onSuccess:()=>queryClient.clear()})
   const create = useMutation({
     mutationFn: api.createProject,
     onSuccess: () => {
@@ -91,6 +120,9 @@ export function App() {
   }
 
   const navLabels={projects:'项目',knowledge:'知识库',types:'内容类型',tasks:'任务中心',models:'模型与校验'} as const
+  if(session.isLoading)return <div className="auth-loading">正在加载工作区…</div>
+  if(!session.data?.user)return <AuthScreen onAuthenticated={(user)=>queryClient.setQueryData(['session'],{user})}/>
+  const currentUser=session.data.user
 
   return (
     <div className="shell">
@@ -104,9 +136,9 @@ export function App() {
           <a className={activeNav === 'models' ? 'active' : ''} href="#models" onClick={(event) => { event.preventDefault(); setActiveNav('models') }}><CircleGauge/>模型与校验</a>
         </nav>
         <div className="sidebar-foot">
-          <div className="avatar">CF</div>
-          <div><strong>创作者</strong><small>本地工作区</small></div>
-          <button aria-label="设置"><MoreHorizontal size={16}/></button>
+          <div className="avatar">{currentUser.name.slice(0,2).toUpperCase()}</div>
+          <div><strong>{currentUser.name}</strong><small>{currentUser.email}</small></div>
+          <button aria-label="退出登录" title="退出登录" onClick={()=>logout.mutate()}><MoreHorizontal size={16}/></button>
         </div>
       </aside>
 
@@ -117,8 +149,8 @@ export function App() {
             <span className={`service-status ${dashboard.isError?'offline':''}`}><i/>{dashboard.isError?'服务连接异常':'服务运行正常'}</span>
             <button className="status-notifications" type="button" aria-label="通知"><Bell size={16}/></button>
             <button className="status-user" type="button" aria-label="用户菜单">
-              <span className="status-avatar">CF</span>
-              <span><strong>本地用户</strong><small>未登录</small></span>
+              <span className="status-avatar">{currentUser.name.slice(0,2).toUpperCase()}</span>
+              <span><strong>{currentUser.name}</strong><small>已登录</small></span>
               <ChevronDown size={14}/>
             </button>
           </div>
