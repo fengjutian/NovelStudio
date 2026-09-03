@@ -71,6 +71,7 @@ export interface Fact { id:string; projectId:string; subject:string; predicate:s
 export interface MemoryEntry { id:string;projectId:string;type:'CHARACTER'|'PLACE'|'TIMELINE'|'PLOT'|'FORESHADOW';name:string;summary:string;status:string;attributes?:Record<string,unknown>;createdAt:string;updatedAt:string }
 export interface MemorySuggestion {type:MemoryEntry['type'];name:string;summary:string;status:string;attributes?:Record<string,unknown>}
 export interface MemoryExtractionResult {memories:MemorySuggestion[];generation:GenerationResult['generation'];documentId:string}
+export interface StorylineAnalysisResult {memories:MemorySuggestion[];generation:GenerationResult['generation'];documentCount:number}
 export interface LocalModelProvider {baseUrl:string;model:string;enabled:boolean;hasApiKey:boolean}
 export interface LocalModelConfig {activeProvider:'deepseek'|'minimax';deepseek:LocalModelProvider;minimax:LocalModelProvider;path:string}
 export interface KnowledgeFile {id:string;projectId:string;name:string;extension:string;mimeType:string;size:number;status:'INDEXED'|'STORED'|'FAILED';sourceId?:string;createdAt:string}

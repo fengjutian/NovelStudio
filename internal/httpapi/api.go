@@ -119,6 +119,7 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/memories", a.listMemories)
 	mux.HandleFunc("POST /api/v1/projects/{id}/memories", a.createMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/memory-extraction-tasks", a.createMemoryExtractionTask)
+	mux.HandleFunc("POST /api/v1/projects/{id}/storyline-analysis-tasks", a.createStorylineAnalysisTask)
 	mux.HandleFunc("PUT /api/v1/memories/{id}", a.updateMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", a.deleteMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
@@ -705,6 +706,67 @@ func (a *API) createMemoryExtractionTask(w http.ResponseWriter, r *http.Request)
 		}
 		progress(90, "记忆建议已生成，等待人工确认")
 		return map[string]any{"memories": valid, "generation": generated, "documentId": doc.ID}, nil
+	})
+	writeJSON(w, http.StatusAccepted, item)
+}
+
+func (a *API) createStorylineAnalysisTask(w http.ResponseWriter, r *http.Request) {
+	if a.generator == nil || !a.generator.Configured(generation.OperationMemory) {
+		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "memory extractor model is not configured")
+		return
+	}
+	projectItem, err := a.store.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	documents, err := a.docs.List(r.Context(), projectItem.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	var content strings.Builder
+	documentCount := 0
+	for _, doc := range documents {
+		versions, versionErr := a.docs.Versions(r.Context(), doc.ID)
+		if versionErr != nil || len(versions) == 0 || strings.TrimSpace(versions[0].Content) == "" {
+			continue
+		}
+		fmt.Fprintf(&content, "\n\n# 文档：%s\n%s", doc.Title, versions[0].Content)
+		documentCount++
+	}
+	if documentCount == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "PROJECT_DOCUMENTS_EMPTY", "project has no document content to analyze")
+		return
+	}
+	item := a.tasks.Create(projectItem.ID, "STORYLINE_ANALYZE", func(ctx context.Context, progress func(int, string)) (any, error) {
+		progress(15, "正在读取项目全部正文")
+		generated, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationMemory, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: "综合分析项目的全部正文，识别跨章节的主线、支线和人物弧光。合并重复剧情，只返回 PLOT 类型记忆，并概括每条故事线的起点、核心冲突、关键转折、当前进展和预期落点", Content: content.String()})
+		if generateErr != nil {
+			return nil, generateErr
+		}
+		var decoded struct {
+			Memories []knowledge.CreateMemoryInput `json:"memories"`
+		}
+		raw := strings.TrimSpace(generated.Content)
+		raw = strings.TrimPrefix(raw, "```json")
+		raw = strings.TrimSuffix(raw, "```")
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil {
+			return nil, fmt.Errorf("decode analyzed storylines: %w", err)
+		}
+		valid := make([]knowledge.CreateMemoryInput, 0, len(decoded.Memories))
+		for _, memory := range decoded.Memories {
+			if strings.TrimSpace(memory.Name) == "" || strings.TrimSpace(memory.Summary) == "" {
+				continue
+			}
+			memory.Type, memory.Status = "PLOT", "PROPOSED"
+			valid = append(valid, memory)
+			if len(valid) == 30 {
+				break
+			}
+		}
+		progress(90, "项目故事线分析完成，等待确认")
+		return map[string]any{"memories": valid, "generation": generated, "documentCount": documentCount}, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
 }
