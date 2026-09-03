@@ -282,9 +282,20 @@ func resultSchema() map[string]any {
 		"type": "object", "additionalProperties": false,
 		"required": []string{"score", "verdict", "dimensions", "issues"},
 		"properties": map[string]any{
-			"score":      map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
-			"verdict":    map[string]any{"type": "string", "enum": []string{"PASS", "WARNING", "FAIL"}},
-			"dimensions": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer"}},
+			"score":   map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+			"verdict": map[string]any{"type": "string", "enum": []string{"PASS", "WARNING", "FAIL"}},
+			"dimensions": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"required":             []string{"groundedness", "consistency", "completeness", "terminology", "style"},
+				"properties": map[string]any{
+					"groundedness": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+					"consistency":  map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+					"completeness": map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+					"terminology":  map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+					"style":        map[string]any{"type": "integer", "minimum": 0, "maximum": 100},
+				},
+			},
 			"issues": map[string]any{"type": "array", "items": map[string]any{
 				"type": "object", "additionalProperties": false,
 				"required": []string{"id", "type", "severity", "claim", "explanation", "suggestedFix", "evidenceIds", "confidence", "startCharacter", "endCharacter"},
