@@ -9,6 +9,67 @@ import (
 	"novelstudio/internal/task"
 )
 
+func TestQueueLimitsConcurrentTasks(t *testing.T) {
+	manager := task.NewManager()
+	manager.ConfigureQueue(2, 10)
+	release := make(chan struct{})
+	started := make(chan struct{}, 3)
+	items := make([]task.Task, 0, 3)
+	for i := 0; i < 3; i++ {
+		items = append(items, manager.Create("p1", "WRITE", func(ctx context.Context, _ func(int, string)) (any, error) {
+			started <- struct{}{}
+			select {
+			case <-release:
+				return "ok", nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}))
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("workers did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("third task started before a worker was available")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	for _, item := range items {
+		waitForStatus(t, manager, item.ID, task.StatusSuccess)
+	}
+}
+
+func TestQueuedTaskCanBeCancelled(t *testing.T) {
+	manager := task.NewManager()
+	manager.ConfigureQueue(1, 2)
+	release := make(chan struct{})
+	first := manager.Create("p1", "WRITE", func(context.Context, func(int, string)) (any, error) {
+		<-release
+		return "ok", nil
+	})
+	secondRan := make(chan struct{}, 1)
+	second := manager.Create("p1", "WRITE", func(context.Context, func(int, string)) (any, error) {
+		secondRan <- struct{}{}
+		return "unexpected", nil
+	})
+	if err := manager.Cancel(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitForStatus(t, manager, first.ID, task.StatusSuccess)
+	waitForStatus(t, manager, second.ID, task.StatusCancelled)
+	select {
+	case <-secondRan:
+		t.Fatal("cancelled queued task executed")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestFailedTaskCanBeRetried(t *testing.T) {
 	manager := task.NewManager()
 	attempts := 0

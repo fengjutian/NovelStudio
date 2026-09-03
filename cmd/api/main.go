@@ -33,6 +33,7 @@ func main() {
 	applyLocalModelConfig()
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
 	defer closeStore()
+	taskManager.ConfigureQueue(positiveEnvInt("AI_WORKER_COUNT", 3), positiveEnvInt("AI_QUEUE_SIZE", 100))
 	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "15m")); err == nil && timeout > 0 {
 		taskManager.SetTimeout(timeout)
 	} else {
@@ -177,7 +178,15 @@ func generationService(recorder airun.Recorder) *generation.Service {
 		slog.Warn("content generation disabled; configure WRITER_MODEL or role-specific models")
 		return nil
 	}
-	return &generation.Service{ProviderName: "openai-compatible", Provider: provider, Models: models, Recorder: recorder, Prompts: promptcatalog.Catalog{Dir: os.Getenv("PROMPT_DIR")}}
+	return &generation.Service{ProviderName: "openai-compatible", Provider: provider, Models: models, Recorder: recorder, Prompts: promptcatalog.Catalog{Dir: os.Getenv("PROMPT_DIR")}, Slots: make(chan struct{}, positiveEnvInt("AI_MODEL_CONCURRENCY", 3))}
+}
+
+func positiveEnvInt(name string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
 }
 
 func first(values ...string) string {

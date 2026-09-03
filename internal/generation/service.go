@@ -65,6 +65,7 @@ type Service struct {
 	Models       map[Operation]string
 	Prompts      promptcatalog.Catalog
 	Recorder     airun.Recorder
+	Slots        chan struct{}
 }
 
 func (s Service) Configured(operation Operation) bool {
@@ -72,6 +73,14 @@ func (s Service) Configured(operation Operation) bool {
 }
 
 func (s Service) Generate(ctx context.Context, request Request) (Result, error) {
+	if s.Slots != nil {
+		select {
+		case s.Slots <- struct{}{}:
+			defer func() { <-s.Slots }()
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		}
+	}
 	if !request.Operation.Valid() {
 		return Result{}, errors.New("unsupported generation operation")
 	}

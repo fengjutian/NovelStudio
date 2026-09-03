@@ -72,10 +72,34 @@ type Manager struct {
 	listenerSeq atomic.Uint64
 	repository  Repository
 	timeout     time.Duration
+	queue       chan queuedTask
+	workerCount int
+	startOnce   sync.Once
+}
+
+type queuedTask struct {
+	ctx      context.Context
+	id       string
+	executor Executor
 }
 
 func NewManager() *Manager {
-	return &Manager{tasks: make(map[string]Task), events: make(map[string][]Event), cancels: make(map[string]context.CancelFunc), listeners: make(map[string]map[uint64]chan Event), executors: make(map[string]Executor), timeout: 15 * time.Minute}
+	return &Manager{tasks: make(map[string]Task), events: make(map[string][]Event), cancels: make(map[string]context.CancelFunc), listeners: make(map[string]map[uint64]chan Event), executors: make(map[string]Executor), timeout: 15 * time.Minute, queue: make(chan queuedTask, 100), workerCount: 3}
+}
+
+// ConfigureQueue sets the process-wide task concurrency and pending queue size.
+// It must be called before the first task is created.
+func (m *Manager) ConfigureQueue(workerCount, queueSize int) {
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if queueSize < 1 {
+		queueSize = 1
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workerCount = workerCount
+	m.queue = make(chan queuedTask, queueSize)
 }
 
 func (m *Manager) SetTimeout(timeout time.Duration) {
@@ -104,8 +128,25 @@ func (m *Manager) Create(projectID, taskType string, executor Executor) Task {
 	m.mu.Unlock()
 	m.persistTask(item)
 	m.publish(item.ID, "task.created", 0, item.Message)
-	go m.execute(ctx, item.ID, executor)
+	m.startWorkers()
+	m.queue <- queuedTask{ctx: ctx, id: item.ID, executor: executor}
 	return item
+}
+
+func (m *Manager) startWorkers() {
+	m.startOnce.Do(func() {
+		m.mu.RLock()
+		workers := m.workerCount
+		queue := m.queue
+		m.mu.RUnlock()
+		for range workers {
+			go func() {
+				for item := range queue {
+					m.execute(item.ctx, item.id, item.executor)
+				}
+			}()
+		}
+	})
 }
 
 func (m *Manager) Retry(id string) (Task, error) {
