@@ -46,6 +46,10 @@ func TestMemoryLifecycleIsProjectScoped(t *testing.T) {
 	if len(items) != 1 || items[0].ID != created.ID || len(other) != 0 {
 		t.Fatalf("items=%#v other=%#v", items, other)
 	}
+	updated, err := store.UpdateMemory(context.Background(), created.ID, knowledge.CreateMemoryInput{Type: "PLOT", Name: "追查真相", Summary: "进入高潮", Status: "ACTIVE", Attributes: map[string]any{"stage": "CLIMAX"}})
+	if err != nil || updated.Name != "追查真相" || updated.Type != "PLOT" || updated.Attributes["stage"] != "CLIMAX" {
+		t.Fatalf("updated=%#v err=%v", updated, err)
+	}
 	if err := store.DeleteMemory(context.Background(), created.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -119,6 +119,7 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/projects/{id}/memories", a.listMemories)
 	mux.HandleFunc("POST /api/v1/projects/{id}/memories", a.createMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/memory-extraction-tasks", a.createMemoryExtractionTask)
+	mux.HandleFunc("PUT /api/v1/memories/{id}", a.updateMemory)
 	mux.HandleFunc("DELETE /api/v1/memories/{id}", a.deleteMemory)
 	mux.HandleFunc("POST /api/v1/projects/{id}/fact-extraction-tasks", a.createFactExtractionTask)
 	mux.HandleFunc("PUT /api/v1/facts/{id}/status", a.updateFactStatus)
@@ -613,6 +614,22 @@ func (a *API) deleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+func (a *API) updateMemory(w http.ResponseWriter, r *http.Request) {
+	var input knowledge.CreateMemoryInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	item, err := a.knowledge.UpdateMemory(r.Context(), r.PathValue("id"), input)
+	if err != nil {
+		if errors.Is(err, knowledge.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		} else {
+			writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (a *API) memoryEvidence(ctx context.Context, projectID string) []generation.Evidence {

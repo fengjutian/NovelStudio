@@ -24,6 +24,7 @@ type Store interface {
 	ListFacts(context.Context, string) ([]Fact, error)
 	UpdateFactStatus(context.Context, string, string) (Fact, error)
 	CreateMemory(context.Context, string, CreateMemoryInput) (MemoryEntry, error)
+	UpdateMemory(context.Context, string, CreateMemoryInput) (MemoryEntry, error)
 	ListMemories(context.Context, string, string) ([]MemoryEntry, error)
 	DeleteMemory(context.Context, string) error
 	CreateFileAsset(context.Context, CreateFileAssetInput) (FileAsset, error)
@@ -129,6 +130,26 @@ func (s *MemoryStore) ListMemories(_ context.Context, projectID, memoryType stri
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items, nil
+}
+func (s *MemoryStore) UpdateMemory(_ context.Context, id string, input CreateMemoryInput) (MemoryEntry, error) {
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.Name = strings.TrimSpace(input.Name)
+	if !validMemoryType(input.Type) || input.Name == "" {
+		return MemoryEntry{}, errors.New("valid type and name are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.memories[id]
+	if !ok {
+		return MemoryEntry{}, ErrNotFound
+	}
+	item.Type, item.Name, item.Summary, item.Attributes = input.Type, input.Name, strings.TrimSpace(input.Summary), input.Attributes
+	if input.Status != "" {
+		item.Status = strings.ToUpper(input.Status)
+	}
+	item.UpdatedAt = time.Now().UTC()
+	s.memories[id] = item
+	return item, nil
 }
 func (s *MemoryStore) DeleteMemory(_ context.Context, id string) error {
 	s.mu.Lock()

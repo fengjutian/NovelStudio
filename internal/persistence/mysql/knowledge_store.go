@@ -102,6 +102,28 @@ func (s KnowledgeStore) ListMemories(ctx context.Context, projectID, memoryType 
 	}
 	return items, rows.Err()
 }
+func (s KnowledgeStore) UpdateMemory(ctx context.Context, id string, input knowledge.CreateMemoryInput) (knowledge.MemoryEntry, error) {
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || (input.Type != "CHARACTER" && input.Type != "PLACE" && input.Type != "TIMELINE" && input.Type != "PLOT" && input.Type != "FORESHADOW") {
+		return knowledge.MemoryEntry{}, errors.New("valid type and name are required")
+	}
+	raw, _ := json.Marshal(input.Attributes)
+	now := time.Now().UTC()
+	result, err := s.DB.ExecContext(ctx, `UPDATE story_memories SET memory_type=?,name=?,summary=?,status=?,attributes=?,updated_at=? WHERE id=?`, input.Type, input.Name, strings.TrimSpace(input.Summary), strings.ToUpper(input.Status), raw, now, id)
+	if err != nil {
+		return knowledge.MemoryEntry{}, err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return knowledge.MemoryEntry{}, knowledge.ErrNotFound
+	}
+	var item knowledge.MemoryEntry
+	var stored []byte
+	err = s.DB.QueryRowContext(ctx, `SELECT id,project_id,memory_type,name,summary,status,attributes,created_at,updated_at FROM story_memories WHERE id=?`, id).Scan(&item.ID, &item.ProjectID, &item.Type, &item.Name, &item.Summary, &item.Status, &stored, &item.CreatedAt, &item.UpdatedAt)
+	_ = json.Unmarshal(stored, &item.Attributes)
+	return item, err
+}
 func (s KnowledgeStore) DeleteMemory(ctx context.Context, id string) error {
 	result, err := s.DB.ExecContext(ctx, `DELETE FROM story_memories WHERE id=?`, id)
 	if err != nil {
