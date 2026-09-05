@@ -326,6 +326,9 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	if provider.calls != 3 {
 		t.Fatalf("provider calls = %d, want 3", provider.calls)
 	}
+	if !strings.Contains(provider.requests[2].Messages[1].Content, "generated body 1") || !strings.Contains(provider.requests[2].Messages[1].Content, "<previous-chapter>") {
+		t.Fatal("retried second chapter did not receive the completed previous chapter as continuity context")
+	}
 	forceBody, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "rewrite all", "windowSize": 1, "force": true})
 	forceResponse := httptest.NewRecorder()
 	handler.ServeHTTP(forceResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/batch-generation-tasks", bytes.NewReader(forceBody)))
@@ -349,6 +352,11 @@ func TestCommentaryBatchRequiresKnowledgeSource(t *testing.T) {
 	item, err := projects.Create(context.Background(), project.CreateInput{Name: "Known show", Type: project.TypeTVCommentary})
 	if err != nil {
 		t.Fatal(err)
+	}
+	singleResponse := httptest.NewRecorder()
+	handler.ServeHTTP(singleResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+item.ID+"/generation-tasks", bytes.NewBufferString(`{"operation":"WRITE","instruction":"write","title":"Episode one"}`)))
+	if singleResponse.Code != http.StatusUnprocessableEntity || !strings.Contains(singleResponse.Body.String(), "SOURCE_REQUIRED") {
+		t.Fatalf("single generation status=%d body=%s", singleResponse.Code, singleResponse.Body.String())
 	}
 	node, err := projects.CreateNode(context.Background(), item.ID, project.CreateNodeInput{NodeType: "EPISODE", Title: "Episode one", Position: 1})
 	if err != nil {

@@ -1106,8 +1106,23 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 	}
 	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
 	request.Evidence = append(request.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
-	if strings.TrimSpace(input.KnowledgeQuery) != "" {
-		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
+	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
+	if input.Operation == generation.OperationWrite && (projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary) {
+		sources, sourcesErr := a.knowledge.ListSources(r.Context(), projectItem.ID)
+		if sourcesErr != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", sourcesErr.Error())
+			return
+		}
+		if len(sources) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "SOURCE_REQUIRED", "影视解说必须先添加剧本、字幕或可信剧情资料，系统不会在无资料时猜测剧情")
+			return
+		}
+		if knowledgeQuery == "" {
+			knowledgeQuery = strings.TrimSpace(projectItem.Name + " " + input.Title)
+		}
+	}
+	if knowledgeQuery != "" {
+		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, knowledgeQuery, 8)
 		if searchErr != nil {
 			writeError(w, http.StatusBadRequest, "INVALID_QUERY", searchErr.Error())
 			return
