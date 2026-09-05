@@ -348,17 +348,15 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 	}
 	evidence := a.memoryEvidence(r.Context(), projectItem.ID)
 	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
+	ungroundedCommentary := false
 	if projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary {
 		sources, sourcesErr := a.knowledge.ListSources(r.Context(), projectItem.ID)
 		if sourcesErr != nil {
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", sourcesErr.Error())
 			return
 		}
-		if len(sources) == 0 {
-			writeError(w, http.StatusUnprocessableEntity, "SOURCE_REQUIRED", "影视解说必须先添加剧本、字幕或可信剧情资料，系统不会在无资料时猜测剧情")
-			return
-		}
-		if knowledgeQuery == "" {
+		ungroundedCommentary = len(sources) == 0
+		if !ungroundedCommentary && knowledgeQuery == "" {
 			chapterTitles := make([]string, 0, len(nodes))
 			for _, node := range nodes {
 				chapterTitles = append(chapterTitles, node.Title)
@@ -442,6 +440,9 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 					}
 				}
 				chapterInstruction := chapterGenerationInstruction(projectItem, node, input.Instruction)
+				if ungroundedCommentary {
+					chapterInstruction += "\n\n当前项目没有外部剧情资料，允许依据模型已有知识创作，但必须避免杜撰具体人物、官职、台词、集数和事件；无法确认的细节应使用概括表达。"
+				}
 				if input.WindowSize == 1 && previousNode.DocumentID != nil && *previousNode.DocumentID != "" {
 					if previousVersions, versionsErr := a.docs.Versions(ctx, *previousNode.DocumentID); versionsErr == nil && len(previousVersions) > 0 {
 						chapterInstruction += "\n\n上一章《" + previousNode.Title + "》结尾（必须承接其事实、人物状态和时间线，不得改写上一章）：\n<previous-chapter>\n" + tailRunes(previousVersions[0].Content, 4000) + "\n</previous-chapter>"
@@ -1114,10 +1115,8 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(sources) == 0 {
-			writeError(w, http.StatusUnprocessableEntity, "SOURCE_REQUIRED", "影视解说必须先添加剧本、字幕或可信剧情资料，系统不会在无资料时猜测剧情")
-			return
-		}
-		if knowledgeQuery == "" {
+			request.Instruction += "\n\n当前项目没有外部剧情资料，允许依据模型已有知识创作，但必须避免杜撰具体人物、官职、台词、集数和事件；无法确认的细节应使用概括表达。"
+		} else if knowledgeQuery == "" {
 			knowledgeQuery = strings.TrimSpace(projectItem.Name + " " + input.Title)
 		}
 	}

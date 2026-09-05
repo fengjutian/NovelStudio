@@ -344,7 +344,7 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	}
 }
 
-func TestCommentaryBatchRequiresKnowledgeSource(t *testing.T) {
+func TestCommentaryGenerationAllowsMissingKnowledgeSource(t *testing.T) {
 	projects := project.NewMemoryStore()
 	documents := document.NewMemoryStore()
 	generator := &generation.Service{ProviderName: "test", Provider: generationProvider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer"}}
@@ -355,7 +355,7 @@ func TestCommentaryBatchRequiresKnowledgeSource(t *testing.T) {
 	}
 	singleResponse := httptest.NewRecorder()
 	handler.ServeHTTP(singleResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+item.ID+"/generation-tasks", bytes.NewBufferString(`{"operation":"WRITE","instruction":"write","title":"Episode one"}`)))
-	if singleResponse.Code != http.StatusUnprocessableEntity || !strings.Contains(singleResponse.Body.String(), "SOURCE_REQUIRED") {
+	if singleResponse.Code != http.StatusAccepted {
 		t.Fatalf("single generation status=%d body=%s", singleResponse.Code, singleResponse.Body.String())
 	}
 	node, err := projects.CreateNode(context.Background(), item.ID, project.CreateNodeInput{NodeType: "EPISODE", Title: "Episode one", Position: 1})
@@ -365,7 +365,7 @@ func TestCommentaryBatchRequiresKnowledgeSource(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"nodeIds": []string{node.ID}, "instruction": "write", "windowSize": 1})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+item.ID+"/batch-generation-tasks", bytes.NewReader(body)))
-	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "SOURCE_REQUIRED") {
+	if response.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
