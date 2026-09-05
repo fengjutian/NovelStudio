@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -337,5 +338,26 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	versionsTwo, _ = documents.Versions(context.Background(), *nodes[1].DocumentID)
 	if len(versionsOne) != 3 || len(versionsTwo) != 3 || provider.calls != 5 {
 		t.Fatalf("forced regeneration versions = %d, %d; provider calls = %d", len(versionsOne), len(versionsTwo), provider.calls)
+	}
+}
+
+func TestCommentaryBatchRequiresKnowledgeSource(t *testing.T) {
+	projects := project.NewMemoryStore()
+	documents := document.NewMemoryStore()
+	generator := &generation.Service{ProviderName: "test", Provider: generationProvider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer"}}
+	handler := httpapi.NewWithServices(projects, documents, knowledge.NewMemoryStore(), nil, generator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	item, err := projects.Create(context.Background(), project.CreateInput{Name: "Known show", Type: project.TypeTVCommentary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := projects.CreateNode(context.Background(), item.ID, project.CreateNodeInput{NodeType: "EPISODE", Title: "Episode one", Position: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"nodeIds": []string{node.ID}, "instruction": "write", "windowSize": 1})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+item.ID+"/batch-generation-tasks", bytes.NewReader(body)))
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "SOURCE_REQUIRED") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

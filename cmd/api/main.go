@@ -34,10 +34,10 @@ func main() {
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
 	defer closeStore()
 	taskManager.ConfigureQueue(positiveEnvInt("AI_WORKER_COUNT", 3), positiveEnvInt("AI_QUEUE_SIZE", 100))
-	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "15m")); err == nil && timeout > 0 {
+	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "60m")); err == nil && timeout > 0 {
 		taskManager.SetTimeout(timeout)
 	} else {
-		slog.Warn("invalid AI_TASK_TIMEOUT; using 15m", "value", os.Getenv("AI_TASK_TIMEOUT"))
+		slog.Warn("invalid AI_TASK_TIMEOUT; using 60m", "value", os.Getenv("AI_TASK_TIMEOUT"))
 	}
 	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)

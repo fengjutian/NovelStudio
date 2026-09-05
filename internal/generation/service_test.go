@@ -95,3 +95,30 @@ func TestGenerateUsesOperationModelAndEvidence(t *testing.T) {
 		t.Fatal("content type prompt was not included in the system prompt")
 	}
 }
+
+func TestCommentaryWriteUsesLowTemperature(t *testing.T) {
+	fake := &provider{}
+	service := generation.Service{ProviderName: "test", Provider: fake, Models: map[generation.Operation]string{generation.OperationWrite: "writer-model"}}
+	_, err := service.Generate(context.Background(), generation.Request{Operation: generation.OperationWrite, ProjectType: "TV_COMMENTARY", Instruction: "write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.request.Temperature != 0.2 {
+		t.Fatalf("temperature = %v, want 0.2", fake.request.Temperature)
+	}
+}
+
+type welcomeProvider struct{}
+
+func (*welcomeProvider) Generate(context.Context, llm.GenerateRequest) (llm.GenerateResponse, error) {
+	return llm.GenerateResponse{Content: "各位观众朋友好，欢迎来到节目。"}, nil
+}
+func (*welcomeProvider) HealthCheck(context.Context) error { return nil }
+
+func TestWriteRejectsForbiddenWelcomeIntro(t *testing.T) {
+	service := generation.Service{ProviderName: "test", Provider: &welcomeProvider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer-model"}}
+	_, err := service.Generate(context.Background(), generation.Request{Operation: generation.OperationWrite, ProjectType: "TV_COMMENTARY", Instruction: "不要写欢迎语"})
+	if err == nil || !strings.Contains(err.Error(), "欢迎语") {
+		t.Fatalf("error = %v, want welcome-intro validation error", err)
+	}
+}

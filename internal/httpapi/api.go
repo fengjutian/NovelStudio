@@ -347,8 +347,27 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		nodes = append(nodes, node)
 	}
 	evidence := a.memoryEvidence(r.Context(), projectItem.ID)
-	if strings.TrimSpace(input.KnowledgeQuery) != "" {
-		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
+	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
+	if projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary {
+		sources, sourcesErr := a.knowledge.ListSources(r.Context(), projectItem.ID)
+		if sourcesErr != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", sourcesErr.Error())
+			return
+		}
+		if len(sources) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "SOURCE_REQUIRED", "影视解说必须先添加剧本、字幕或可信剧情资料，系统不会在无资料时猜测剧情")
+			return
+		}
+		if knowledgeQuery == "" {
+			chapterTitles := make([]string, 0, len(nodes))
+			for _, node := range nodes {
+				chapterTitles = append(chapterTitles, node.Title)
+			}
+			knowledgeQuery = projectItem.Name + " " + strings.Join(chapterTitles, " ")
+		}
+	}
+	if knowledgeQuery != "" {
+		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, knowledgeQuery, 8)
 		if searchErr != nil {
 			writeError(w, http.StatusBadRequest, "INVALID_QUERY", searchErr.Error())
 			return
@@ -373,14 +392,36 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		var wait sync.WaitGroup
 		var resultMu sync.Mutex
 		var completed atomic.Int64
-		for _, originalNode := range nodes {
+		orderedGate := make(chan struct{})
+		close(orderedGate)
+		for nodeIndex, originalNode := range nodes {
 			node := originalNode
+			var previousNode project.ContentNode
+			if nodeIndex > 0 {
+				previousNode = nodes[nodeIndex-1]
+				if latest, ok := latestByID[previousNode.ID]; ok {
+					previousNode = latest
+				}
+			}
+			waitForTurn := orderedGate
+			nextTurn := make(chan struct{})
+			orderedGate = nextTurn
 			if latest, ok := latestByID[node.ID]; ok {
 				node = latest
 			}
 			wait.Add(1)
-			go func(node project.ContentNode) {
+			go func(node, previousNode project.ContentNode, waitForTurn, nextTurn chan struct{}) {
 				defer wait.Done()
+				if input.WindowSize == 1 {
+					select {
+					case <-waitForTurn:
+					case <-ctx.Done():
+						close(nextTurn)
+						errorsChannel <- ctx.Err()
+						return
+					}
+					defer close(nextTurn)
+				}
 				select {
 				case semaphore <- struct{}{}:
 				case <-ctx.Done():
@@ -400,7 +441,13 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						return
 					}
 				}
-				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterGenerationInstruction(projectItem, node, input.Instruction), Evidence: evidence})
+				chapterInstruction := chapterGenerationInstruction(projectItem, node, input.Instruction)
+				if input.WindowSize == 1 && previousNode.DocumentID != nil && *previousNode.DocumentID != "" {
+					if previousVersions, versionsErr := a.docs.Versions(ctx, *previousNode.DocumentID); versionsErr == nil && len(previousVersions) > 0 {
+						chapterInstruction += "\n\n上一章《" + previousNode.Title + "》结尾（必须承接其事实、人物状态和时间线，不得改写上一章）：\n<previous-chapter>\n" + tailRunes(previousVersions[0].Content, 4000) + "\n</previous-chapter>"
+					}
+				}
+				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterInstruction, Evidence: evidence})
 				if generateErr != nil {
 					errorsChannel <- generateErr
 					return
@@ -436,7 +483,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 				resultMu.Unlock()
 				done := completed.Add(1)
 				progress(5+int(done)*90/len(nodes), "已保存 "+node.Title)
-			}(node)
+			}(node, previousNode, waitForTurn, nextTurn)
 		}
 		wait.Wait()
 		close(errorsChannel)
@@ -852,6 +899,15 @@ func chapterGenerationInstruction(projectItem project.Project, node project.Cont
 	}
 	parts = append(parts, "当前章节："+node.Title, "只创作当前章节，不要写欢迎语、节目介绍、创作说明或下一章正文。")
 	return strings.Join(parts, "\n\n")
+}
+
+func tailRunes(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	runes := []rune(text)
+	if limit > 0 && len(runes) > limit {
+		return string(runes[len(runes)-limit:])
+	}
+	return text
 }
 
 func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request) {
