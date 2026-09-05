@@ -313,6 +313,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		Instruction    string   `json:"instruction"`
 		KnowledgeQuery string   `json:"knowledgeQuery"`
 		WindowSize     int      `json:"windowSize"`
+		Force          bool     `json:"force"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
@@ -387,7 +388,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 				defer func() { <-semaphore }()
-				if node.DocumentID != nil && *node.DocumentID != "" {
+				if !input.Force && node.DocumentID != nil && *node.DocumentID != "" {
 					versions, versionsErr := a.docs.Versions(ctx, *node.DocumentID)
 					if versionsErr != nil {
 						errorsChannel <- versionsErr
@@ -399,7 +400,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						return
 					}
 				}
-				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction + "\n当前内容节点：" + node.Title, Evidence: evidence})
+				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterGenerationInstruction(projectItem, node, input.Instruction), Evidence: evidence})
 				if generateErr != nil {
 					errorsChannel <- generateErr
 					return
@@ -836,6 +837,21 @@ func (a *API) createFactExtractionTask(w http.ResponseWriter, r *http.Request) {
 		return map[string]any{"facts": facts, "generation": generated}, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
+}
+
+func chapterGenerationInstruction(projectItem project.Project, node project.ContentNode, instruction string) string {
+	parts := []string{strings.TrimSpace(instruction), "作品名称：" + projectItem.Name}
+	if description := strings.TrimSpace(projectItem.Description); description != "" {
+		parts = append(parts, "项目说明：\n"+description)
+	}
+	if brief, ok := node.Metadata["creativeBrief"].(string); ok && strings.TrimSpace(brief) != "" {
+		parts = append(parts, "必须遵守的原始创作简报：\n"+strings.TrimSpace(brief))
+	}
+	if outline, ok := node.Metadata["sourceOutline"].(string); ok && strings.TrimSpace(outline) != "" {
+		parts = append(parts, "全书目录（用于确定本章位置、前后承接和整体节奏）：\n"+strings.TrimSpace(outline))
+	}
+	parts = append(parts, "当前章节："+node.Title, "只创作当前章节，不要写欢迎语、节目介绍、创作说明或下一章正文。")
+	return strings.Join(parts, "\n\n")
 }
 
 func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request) {

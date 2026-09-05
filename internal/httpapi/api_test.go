@@ -204,18 +204,20 @@ func (generationProvider) Generate(context.Context, llm.GenerateRequest) (llm.Ge
 func (generationProvider) HealthCheck(context.Context) error { return nil }
 
 type resumableGenerationProvider struct {
-	mu    sync.Mutex
-	calls int
+	mu       sync.Mutex
+	calls    int
+	requests []llm.GenerateRequest
 }
 
-func (p *resumableGenerationProvider) Generate(context.Context, llm.GenerateRequest) (llm.GenerateResponse, error) {
+func (p *resumableGenerationProvider) Generate(_ context.Context, request llm.GenerateRequest) (llm.GenerateResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
+	p.requests = append(p.requests, request)
 	if p.calls == 2 {
 		return llm.GenerateResponse{}, errors.New("temporary provider failure")
 	}
-	return llm.GenerateResponse{Content: "generated body"}, nil
+	return llm.GenerateResponse{Content: "generated body " + string(rune('0'+p.calls))}, nil
 }
 func (*resumableGenerationProvider) HealthCheck(context.Context) error { return nil }
 
@@ -287,17 +289,19 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	}
 	waitForStatus := func(id string, wanted task.Status) task.Task {
 		deadline := time.Now().Add(2 * time.Second)
+		var last task.Task
 		for time.Now().Before(deadline) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+id, nil))
 			var current task.Task
 			_ = json.NewDecoder(response.Body).Decode(&current)
+			last = current
 			if current.Status == wanted {
 				return current
 			}
 			time.Sleep(time.Millisecond)
 		}
-		t.Fatalf("task %s did not reach %s", id, wanted)
+		t.Fatalf("task %s did not reach %s: status=%s error=%s", id, wanted, last.Status, last.Error)
 		return task.Task{}
 	}
 	waitForStatus(created.ID, task.StatusFailed)
@@ -320,5 +324,18 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	}
 	if provider.calls != 3 {
 		t.Fatalf("provider calls = %d, want 3", provider.calls)
+	}
+	forceBody, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "rewrite all", "windowSize": 1, "force": true})
+	forceResponse := httptest.NewRecorder()
+	handler.ServeHTTP(forceResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/batch-generation-tasks", bytes.NewReader(forceBody)))
+	var forced task.Task
+	if err := json.NewDecoder(forceResponse.Body).Decode(&forced); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(forced.ID, task.StatusSuccess)
+	versionsOne, _ = documents.Versions(context.Background(), *nodes[0].DocumentID)
+	versionsTwo, _ = documents.Versions(context.Background(), *nodes[1].DocumentID)
+	if len(versionsOne) != 3 || len(versionsTwo) != 3 || provider.calls != 5 {
+		t.Fatalf("forced regeneration versions = %d, %d; provider calls = %d", len(versionsOne), len(versionsTwo), provider.calls)
 	}
 }
