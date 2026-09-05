@@ -111,7 +111,7 @@ func (s Service) Generate(ctx context.Context, request Request) (Result, error) 
 	}
 	messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
 	start := time.Now()
-	response, err := s.Provider.Generate(ctx, llm.GenerateRequest{Model: model, Messages: messages, Temperature: temperature(request.Operation), MaxTokens: 8000})
+	response, err := s.Provider.Generate(ctx, llm.GenerateRequest{Model: model, Messages: messages, Temperature: temperature(request.Operation, request.ProjectType), MaxTokens: 8000})
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		s.record(ctx, request, model, promptVersion, llm.GenerateResponse{}, latency, "FAILED", err.Error())
@@ -120,6 +120,10 @@ func (s Service) Generate(ctx context.Context, request Request) (Result, error) 
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
 		return Result{}, errors.New("model returned empty content")
+	}
+	if err := validateOutput(request, content); err != nil {
+		s.record(ctx, request, model, promptVersion, response, latency, "FAILED", err.Error())
+		return Result{}, err
 	}
 	s.record(ctx, request, model, promptVersion, response, latency, "SUCCESS", "")
 	return Result{Content: content, Operation: request.Operation, PromptVersion: promptVersion, Provider: s.ProviderName, Model: model, RequestID: response.RequestID, InputTokens: response.InputTokens, OutputTokens: response.OutputTokens, LatencyMs: latency, EvidenceIDs: evidenceIDs}, nil
@@ -142,12 +146,28 @@ func buildContext(evidence []Evidence) (string, []string) {
 	return strings.TrimSpace(builder.String()), ids
 }
 
-func temperature(operation Operation) float64 {
+func temperature(operation Operation, projectType string) float64 {
 	if operation == OperationWrite {
+		if projectType == "TV_COMMENTARY" || projectType == "MOVIE_COMMENTARY" {
+			return 0.2
+		}
 		return 0.7
 	}
 	if operation == OperationPolish || operation == OperationRepair || operation == OperationExtract || operation == OperationMemory {
 		return 0.3
 	}
 	return 0.4
+}
+
+func validateOutput(request Request, content string) error {
+	if request.Operation != OperationWrite || !strings.Contains(request.Instruction, "不要写欢迎语") {
+		return nil
+	}
+	plain := strings.TrimSpace(strings.TrimLeft(content, "#*- "))
+	for _, prefix := range []string{"各位观众", "各位朋友", "欢迎来到", "大家好", "今天我们"} {
+		if strings.HasPrefix(plain, prefix) {
+			return fmt.Errorf("模型输出不合规：正文以欢迎语或节目介绍开场（%s）", prefix)
+		}
+	}
+	return nil
 }
