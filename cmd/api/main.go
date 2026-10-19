@@ -33,6 +33,10 @@ func main() {
 	applyLocalModelConfig()
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
 	defer closeStore()
+	if err := seedDefaultUser(authStore); err != nil {
+		slog.Error("cannot create default user", "error", err)
+		os.Exit(1)
+	}
 	taskManager.ConfigureQueue(positiveEnvInt("AI_WORKER_COUNT", 3), positiveEnvInt("AI_QUEUE_SIZE", 100))
 	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "60m")); err == nil && timeout > 0 {
 		taskManager.SetTimeout(timeout)
@@ -225,6 +229,34 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, q
 	}
 	slog.Info("MySQL persistence enabled")
 	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, mysqlstore.AuthStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
+}
+
+func seedDefaultUser(store auth.Store) error {
+	email := auth.NormalizeEmail(env("DEFAULT_USER_EMAIL", "admin@novelstudio.local"))
+	password := env("DEFAULT_USER_PASSWORD", "admin12345")
+	name := strings.TrimSpace(env("DEFAULT_USER_NAME", "Administrator"))
+	if email == "" || password == "" {
+		slog.Info("default user disabled")
+		return nil
+	}
+	if len(password) < 8 || len(password) > 128 {
+		return fmt.Errorf("DEFAULT_USER_PASSWORD must be 8 to 128 characters")
+	}
+	if _, _, err := store.UserByEmail(context.Background(), email); err == nil {
+		return nil
+	} else if err != auth.ErrNotFound {
+		return fmt.Errorf("look up default user: %w", err)
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash default user password: %w", err)
+	}
+	user := auth.User{ID: auth.NewID("usr_"), Name: name, Email: email, CreatedAt: time.Now().UTC()}
+	if err := store.CreateUser(context.Background(), user, hash); err != nil && err != auth.ErrEmailTaken {
+		return fmt.Errorf("create default user: %w", err)
+	}
+	slog.Info("default user ready", "email", email)
+	return nil
 }
 
 func validationPipeline(recorder airun.Recorder) *validation.Pipeline {

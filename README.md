@@ -56,6 +56,10 @@ npm run dev
 
 浏览器打开 `http://localhost:5173`。Vite 会将 `/api` 请求代理到 Go API。
 
+默认开发账号为 `admin@novelstudio.local`，密码为 `admin12345`。可以通过 `.env` 中的
+`DEFAULT_USER_NAME`、`DEFAULT_USER_EMAIL` 和 `DEFAULT_USER_PASSWORD` 修改；将邮箱或密码留空可禁用默认账号。
+如果该邮箱已经存在，启动时不会覆盖原密码。
+
 ## 原生 MySQL 持久化
 
 项目不依赖 Docker。请先在本机或服务器安装并启动 MySQL 8.4，然后创建数据库和应用账号：
