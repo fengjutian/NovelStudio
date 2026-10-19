@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"novelstudio/internal/auth"
 )
 
 var ErrNotFound = errors.New("project not found")
@@ -25,6 +27,8 @@ type Store interface {
 	CreateNode(context.Context, string, CreateNodeInput) (ContentNode, error)
 	UpdateNode(context.Context, string, UpdateNodeInput) (ContentNode, error)
 	DeleteNode(context.Context, string) error
+	ProjectIDForNode(context.Context, string) (string, error)
+	ClaimUnowned(context.Context, string) error
 	ListContentTypes(context.Context) ([]ContentType, error)
 	CreateContentType(context.Context, CreateContentTypeInput) (ContentType, error)
 	UpdateContentType(context.Context, Type, UpdateContentTypeInput) (ContentType, error)
@@ -46,6 +50,29 @@ func (s *MemoryStore) CreateNode(_ context.Context, projectID string, input Crea
 	item := ContentNode{ID: s.nextID("nod"), ProjectID: projectID, ParentID: input.ParentID, NodeType: strings.ToUpper(input.NodeType), Title: strings.TrimSpace(input.Title), Position: input.Position, Metadata: input.Metadata}
 	s.nodes[projectID] = append(s.nodes[projectID], item)
 	return item, nil
+}
+func (s *MemoryStore) ProjectIDForNode(_ context.Context, id string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for projectID, nodes := range s.nodes {
+		for _, node := range nodes {
+			if node.ID == id {
+				return projectID, nil
+			}
+		}
+	}
+	return "", ErrNotFound
+}
+func (s *MemoryStore) ClaimUnowned(_ context.Context, ownerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, item := range s.projects {
+		if item.OwnerID == "" {
+			item.OwnerID = ownerID
+			s.projects[id] = item
+		}
+	}
+	return nil
 }
 func (s *MemoryStore) UpdateNode(_ context.Context, id string, input UpdateNodeInput) (ContentNode, error) {
 	s.mu.Lock()
@@ -123,28 +150,33 @@ func NewMemoryStore() *MemoryStore {
 	return s
 }
 
-func (s *MemoryStore) List(context.Context) ([]Project, error) {
+func (s *MemoryStore) List(ctx context.Context) ([]Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]Project, 0, len(s.projects))
+	user, scoped := auth.UserFromContext(ctx)
 	for _, item := range s.projects {
+		if scoped && item.OwnerID != user.ID {
+			continue
+		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	return items, nil
 }
 
-func (s *MemoryStore) Get(_ context.Context, id string) (Project, error) {
+func (s *MemoryStore) Get(ctx context.Context, id string) (Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	item, ok := s.projects[id]
-	if !ok {
+	user, scoped := auth.UserFromContext(ctx)
+	if !ok || scoped && item.OwnerID != user.ID {
 		return Project{}, ErrNotFound
 	}
 	return item, nil
 }
 
-func (s *MemoryStore) Create(_ context.Context, input CreateInput) (Project, error) {
+func (s *MemoryStore) Create(ctx context.Context, input CreateInput) (Project, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" {
 		return Project{}, errors.New("name is required")
@@ -158,6 +190,9 @@ func (s *MemoryStore) Create(_ context.Context, input CreateInput) (Project, err
 	now := time.Now().UTC()
 	id := s.nextID("prj")
 	item := Project{ID: id, Name: input.Name, Type: input.Type, Description: strings.TrimSpace(input.Description), Status: "DRAFT", CreatedAt: now, UpdatedAt: now}
+	if user, ok := auth.UserFromContext(ctx); ok {
+		item.OwnerID = user.ID
+	}
 	s.mu.Lock()
 	s.projects[id] = item
 	s.nodes[id] = defaultTree(id, input.Type)

@@ -45,6 +45,7 @@ type UpdateContentTypeInput struct {
 
 type Project struct {
 	ID          string    `json:"id"`
+	OwnerID     string    `json:"-"`
 	Name        string    `json:"name"`
 	Type        Type      `json:"type"`
 	Description string    `json:"description"`

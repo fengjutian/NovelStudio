@@ -25,6 +25,17 @@ type User struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type userContextKey struct{}
+
+func WithUser(ctx context.Context, user User) context.Context {
+	return context.WithValue(ctx, userContextKey{}, user)
+}
+
+func UserFromContext(ctx context.Context) (User, bool) {
+	user, ok := ctx.Value(userContextKey{}).(User)
+	return user, ok && user.ID != ""
+}
+
 type Store interface {
 	CreateUser(context.Context, User, string) error
 	UserByEmail(context.Context, string) (User, string, error)
