@@ -63,12 +63,26 @@ func (s *MemoryStore) ListStale(_ context.Context, projectID, branchID string) (
 func (s *MemoryStore) ResolveStale(_ context.Context, projectID, branchID, chapterVersionID string, input ResolveStaleInput) (StaleChapter, error) {
 	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
 	input.ResolvedBy = strings.TrimSpace(input.ResolvedBy)
-	if input.Status != "REVIEWING" && input.Status != "VALID" && input.Status != "ACCEPTED_RISK" { return StaleChapter{}, fmt.Errorf("%w: invalid stale status", ErrInvalid) }
-	if input.Status != "REVIEWING" && input.ResolvedBy == "" { return StaleChapter{}, fmt.Errorf("%w: resolvedBy is required", ErrInvalid) }
-	s.mu.Lock(); defer s.mu.Unlock()
-	k := dependencyKey(projectID, branchID, chapterVersionID); item, ok := s.stale[k]; if !ok { return StaleChapter{}, ErrUnknownRef }
+	if input.Status != "REVIEWING" && input.Status != "VALID" && input.Status != "ACCEPTED_RISK" {
+		return StaleChapter{}, fmt.Errorf("%w: invalid stale status", ErrInvalid)
+	}
+	if input.Status != "REVIEWING" && input.ResolvedBy == "" {
+		return StaleChapter{}, fmt.Errorf("%w: resolvedBy is required", ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := dependencyKey(projectID, branchID, chapterVersionID)
+	item, ok := s.stale[k]
+	if !ok {
+		return StaleChapter{}, ErrUnknownRef
+	}
 	item.Status, item.ResolvedBy, item.ResolutionNote = input.Status, input.ResolvedBy, strings.TrimSpace(input.Note)
-	if input.Status == "REVIEWING" { item.ResolvedAt = nil } else { now := time.Now().UTC(); item.ResolvedAt = &now }
+	if input.Status == "REVIEWING" {
+		item.ResolvedAt = nil
+	} else {
+		now := time.Now().UTC()
+		item.ResolvedAt = &now
+	}
 	s.stale[k] = item
 	return item, nil
 }
@@ -106,7 +120,9 @@ func analyzeDependencies(all map[string]ChapterDependencies, request ImpactReque
 			for _, id := range dep.DependsOnChapterVersionIDs {
 				if chapters[id] {
 					matched = append(matched, "CHAPTER_VERSION:"+id)
-					for _, path := range paths[id] { paths[dep.ChapterVersionID] = append(paths[dep.ChapterVersionID], append(append([]string{}, path...), dep.ChapterVersionID)) }
+					for _, path := range paths[id] {
+						paths[dep.ChapterVersionID] = append(paths[dep.ChapterVersionID], append(append([]string{}, path...), dep.ChapterVersionID))
+					}
 				}
 			}
 			if len(matched) > 0 {

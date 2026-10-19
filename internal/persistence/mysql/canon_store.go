@@ -349,18 +349,68 @@ func (s CanonStore) ListStale(ctx context.Context, projectID, branchID string) (
 	items := []canon.StaleChapter{}
 	for rows.Next() {
 		var item canon.StaleChapter
-		var raw, paths []byte; var resolved sql.NullTime
+		var raw, paths []byte
+		var resolved sql.NullTime
 		if err := rows.Scan(&item.ProjectID, &item.BranchID, &item.ChapterVersionID, &item.TriggerCanonVersion, &raw, &paths, &item.Status, &item.CreatedAt, &resolved, &item.ResolvedBy, &item.ResolutionNote); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &item.Reasons)
-		_ = json.Unmarshal(paths, &item.Paths); if resolved.Valid { item.ResolvedAt=&resolved.Time }
+		_ = json.Unmarshal(paths, &item.Paths)
+		if resolved.Valid {
+			item.ResolvedAt = &resolved.Time
+		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-func (s CanonStore) ResolveStale(ctx context.Context, projectID, branchID, chapterVersionID string, input canon.ResolveStaleInput) (canon.StaleChapter,error) {
-	input.Status=strings.ToUpper(strings.TrimSpace(input.Status));input.ResolvedBy=strings.TrimSpace(input.ResolvedBy);if input.Status!="REVIEWING"&&input.Status!="VALID"&&input.Status!="ACCEPTED_RISK"{return canon.StaleChapter{},fmt.Errorf("%w: invalid stale status",canon.ErrInvalid)};if input.Status!="REVIEWING"&&input.ResolvedBy==""{return canon.StaleChapter{},fmt.Errorf("%w: resolvedBy is required",canon.ErrInvalid)}
-	tx,err:=s.DB.BeginTx(ctx,nil);if err!=nil{return canon.StaleChapter{},err};defer tx.Rollback();branchID=canonBranch(branchID);var from string;if err=tx.QueryRowContext(ctx,`SELECT status FROM stale_chapters WHERE project_id=? AND branch_id=? AND chapter_version_id=? FOR UPDATE`,projectID,branchID,chapterVersionID).Scan(&from);errors.Is(err,sql.ErrNoRows){return canon.StaleChapter{},canon.ErrUnknownRef}else if err!=nil{return canon.StaleChapter{},err};now:=time.Now().UTC();var resolved any;if input.Status!="REVIEWING"{resolved=now};if _,err=tx.ExecContext(ctx,`UPDATE stale_chapters SET status=?,resolved_at=?,resolved_by=?,resolution_note=? WHERE project_id=? AND branch_id=? AND chapter_version_id=?`,input.Status,resolved,nullable(input.ResolvedBy),strings.TrimSpace(input.Note),projectID,branchID,chapterVersionID);err!=nil{return canon.StaleChapter{},err};actor:=input.ResolvedBy;if actor==""{actor="system"};if _,err=tx.ExecContext(ctx,`INSERT INTO stale_chapter_history(id,project_id,branch_id,chapter_version_id,from_status,to_status,actor_id,note,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,newID("sth"),projectID,branchID,chapterVersionID,from,input.Status,actor,strings.TrimSpace(input.Note),now);err!=nil{return canon.StaleChapter{},err};if err=tx.Commit();err!=nil{return canon.StaleChapter{},err};items,err:=s.ListStale(ctx,projectID,branchID);if err!=nil{return canon.StaleChapter{},err};for _,item:=range items{if item.ChapterVersionID==chapterVersionID{return item,nil}};return canon.StaleChapter{},canon.ErrUnknownRef
+func (s CanonStore) ResolveStale(ctx context.Context, projectID, branchID, chapterVersionID string, input canon.ResolveStaleInput) (canon.StaleChapter, error) {
+	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
+	input.ResolvedBy = strings.TrimSpace(input.ResolvedBy)
+	if input.Status != "REVIEWING" && input.Status != "VALID" && input.Status != "ACCEPTED_RISK" {
+		return canon.StaleChapter{}, fmt.Errorf("%w: invalid stale status", canon.ErrInvalid)
+	}
+	if input.Status != "REVIEWING" && input.ResolvedBy == "" {
+		return canon.StaleChapter{}, fmt.Errorf("%w: resolvedBy is required", canon.ErrInvalid)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return canon.StaleChapter{}, err
+	}
+	defer tx.Rollback()
+	branchID = canonBranch(branchID)
+	var from string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM stale_chapters WHERE project_id=? AND branch_id=? AND chapter_version_id=? FOR UPDATE`, projectID, branchID, chapterVersionID).Scan(&from); errors.Is(err, sql.ErrNoRows) {
+		return canon.StaleChapter{}, canon.ErrUnknownRef
+	} else if err != nil {
+		return canon.StaleChapter{}, err
+	}
+	now := time.Now().UTC()
+	var resolved any
+	if input.Status != "REVIEWING" {
+		resolved = now
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE stale_chapters SET status=?,resolved_at=?,resolved_by=?,resolution_note=? WHERE project_id=? AND branch_id=? AND chapter_version_id=?`, input.Status, resolved, nullable(input.ResolvedBy), strings.TrimSpace(input.Note), projectID, branchID, chapterVersionID); err != nil {
+		return canon.StaleChapter{}, err
+	}
+	actor := input.ResolvedBy
+	if actor == "" {
+		actor = "system"
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO stale_chapter_history(id,project_id,branch_id,chapter_version_id,from_status,to_status,actor_id,note,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, newID("sth"), projectID, branchID, chapterVersionID, from, input.Status, actor, strings.TrimSpace(input.Note), now); err != nil {
+		return canon.StaleChapter{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return canon.StaleChapter{}, err
+	}
+	items, err := s.ListStale(ctx, projectID, branchID)
+	if err != nil {
+		return canon.StaleChapter{}, err
+	}
+	for _, item := range items {
+		if item.ChapterVersionID == chapterVersionID {
+			return item, nil
+		}
+	}
+	return canon.StaleChapter{}, canon.ErrUnknownRef
 }

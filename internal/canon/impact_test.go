@@ -19,6 +19,11 @@ func TestImpactAnalysisPropagatesThroughChapters(t *testing.T) {
 	if len(stale) != 3 {
 		t.Fatalf("stale=%#v", stale)
 	}
-	if len(got.Affected[2].Paths)==0 { t.Fatalf("missing propagation path: %#v",got.Affected) }
-	resolved,err:=s.ResolveStale(ctx,"p","main","ch12",ResolveStaleInput{Status:"VALID",ResolvedBy:"author",Note:"review passed"});if err!=nil||resolved.ResolvedAt==nil||resolved.Status!="VALID"{t.Fatalf("resolved=%#v err=%v",resolved,err)}
+	if len(got.Affected[2].Paths) == 0 {
+		t.Fatalf("missing propagation path: %#v", got.Affected)
+	}
+	resolved, err := s.ResolveStale(ctx, "p", "main", "ch12", ResolveStaleInput{Status: "VALID", ResolvedBy: "author", Note: "review passed"})
+	if err != nil || resolved.ResolvedAt == nil || resolved.Status != "VALID" {
+		t.Fatalf("resolved=%#v err=%v", resolved, err)
+	}
 }
