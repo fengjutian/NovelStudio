@@ -1577,31 +1577,53 @@ func (a *API) commitCanon(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) registerChapterDependencies(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	if _, err := a.store.Get(r.Context(), projectID); err != nil { a.handleStoreError(w, err); return }
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
 	var input canon.ChapterDependencies
-	if !decodeJSON(w,r,&input){return}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	input.ProjectID, input.ChapterVersionID = projectID, r.PathValue("versionId")
-	if err:=a.canon.RegisterDependencies(r.Context(),input);err!=nil{writeError(w,http.StatusUnprocessableEntity,"INVALID_DEPENDENCIES",err.Error());return}
+	if err := a.canon.RegisterDependencies(r.Context(), input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_DEPENDENCIES", err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) analyzeImpact(w http.ResponseWriter, r *http.Request) {
-	projectID:=r.PathValue("id")
-	if _,err:=a.store.Get(r.Context(),projectID);err!=nil{a.handleStoreError(w,err);return}
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
 	var input canon.ImpactRequest
-	if !decodeJSON(w,r,&input){return}
-	input.ProjectID=projectID
-	result,err:=a.canon.AnalyzeImpact(r.Context(),input)
-	if err!=nil{writeError(w,http.StatusUnprocessableEntity,"IMPACT_ANALYSIS_FAILED",err.Error());return}
-	writeJSON(w,http.StatusOK,result)
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.ProjectID = projectID
+	result, err := a.canon.AnalyzeImpact(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "IMPACT_ANALYSIS_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *API) listStaleChapters(w http.ResponseWriter, r *http.Request) {
-	projectID:=r.PathValue("id")
-	if _,err:=a.store.Get(r.Context(),projectID);err!=nil{a.handleStoreError(w,err);return}
-	items,err:=a.canon.ListStale(r.Context(),projectID,r.URL.Query().Get("branchId"))
-	if err!=nil{writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());return}
-	writeJSON(w,http.StatusOK,map[string]any{"items":items,"total":len(items)})
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	items, err := a.canon.ListStale(r.Context(), projectID, r.URL.Query().Get("branchId"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
 func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {

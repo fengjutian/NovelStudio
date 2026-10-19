@@ -240,21 +240,120 @@ func canonBranch(v string) string {
 
 func (s CanonStore) RegisterDependencies(ctx context.Context, input canon.ChapterDependencies) error {
 	input.ProjectID, input.BranchID, input.ChapterVersionID = strings.TrimSpace(input.ProjectID), canonBranch(input.BranchID), strings.TrimSpace(input.ChapterVersionID)
-	if input.ProjectID == "" || input.ChapterVersionID == "" || input.CanonVersion < 0 { return fmt.Errorf("%w: invalid chapter dependencies", canon.ErrInvalid) }
-	tx,err:=s.DB.BeginTx(ctx,nil);if err!=nil{return err};defer tx.Rollback()
-	var projectID string;if err=tx.QueryRowContext(ctx,`SELECT d.project_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE v.id=?`,input.ChapterVersionID).Scan(&projectID);err!=nil||projectID!=input.ProjectID{return fmt.Errorf("%w: chapter version is not part of project",canon.ErrInvalid)}
-	if _,err=tx.ExecContext(ctx,`DELETE FROM chapter_dependencies WHERE project_id=? AND branch_id=? AND chapter_version_id=?`,input.ProjectID,input.BranchID,input.ChapterVersionID);err!=nil{return err}
-	now:=time.Now().UTC();groups:=[]struct{kind string;ids []string}{{"FACT",input.FactIDs},{"ENTITY",input.EntityIDs},{"EVENT",input.EventIDs},{"CHAPTER_VERSION",input.DependsOnChapterVersionIDs}}
-	seen:=map[string]bool{};for _,group:=range groups{for _,id:=range group.ids{id=strings.TrimSpace(id);k:=group.kind+"\x00"+id;if id==""||seen[k]{continue};seen[k]=true;if _,err=tx.ExecContext(ctx,`INSERT INTO chapter_dependencies(project_id,branch_id,chapter_version_id,canon_version,dependency_kind,dependency_id,created_at) VALUES(?,?,?,?,?,?,?)`,input.ProjectID,input.BranchID,input.ChapterVersionID,input.CanonVersion,group.kind,id,now);err!=nil{return err}}}
+	if input.ProjectID == "" || input.ChapterVersionID == "" || input.CanonVersion < 0 {
+		return fmt.Errorf("%w: invalid chapter dependencies", canon.ErrInvalid)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var projectID string
+	if err = tx.QueryRowContext(ctx, `SELECT d.project_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE v.id=?`, input.ChapterVersionID).Scan(&projectID); err != nil || projectID != input.ProjectID {
+		return fmt.Errorf("%w: chapter version is not part of project", canon.ErrInvalid)
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM chapter_dependencies WHERE project_id=? AND branch_id=? AND chapter_version_id=?`, input.ProjectID, input.BranchID, input.ChapterVersionID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	groups := []struct {
+		kind string
+		ids  []string
+	}{{"FACT", input.FactIDs}, {"ENTITY", input.EntityIDs}, {"EVENT", input.EventIDs}, {"CHAPTER_VERSION", input.DependsOnChapterVersionIDs}}
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, id := range group.ids {
+			id = strings.TrimSpace(id)
+			k := group.kind + "\x00" + id
+			if id == "" || seen[k] {
+				continue
+			}
+			seen[k] = true
+			if _, err = tx.ExecContext(ctx, `INSERT INTO chapter_dependencies(project_id,branch_id,chapter_version_id,canon_version,dependency_kind,dependency_id,created_at) VALUES(?,?,?,?,?,?,?)`, input.ProjectID, input.BranchID, input.ChapterVersionID, input.CanonVersion, group.kind, id, now); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
-func (s CanonStore) AnalyzeImpact(ctx context.Context, request canon.ImpactRequest) (canon.ImpactResult,error) {
-	request.ProjectID,request.BranchID=strings.TrimSpace(request.ProjectID),canonBranch(request.BranchID);if request.ProjectID==""{return canon.ImpactResult{},fmt.Errorf("%w: projectId is required",canon.ErrInvalid)}
-	rows,err:=s.DB.QueryContext(ctx,`SELECT chapter_version_id,canon_version,dependency_kind,dependency_id FROM chapter_dependencies WHERE project_id=? AND branch_id=?`,request.ProjectID,request.BranchID);if err!=nil{return canon.ImpactResult{},err};defer rows.Close()
-	byChapter:=map[string]*canon.ChapterDependencies{};for rows.Next(){var chapter,kind,id string;var version int64;if err:=rows.Scan(&chapter,&version,&kind,&id);err!=nil{return canon.ImpactResult{},err};item:=byChapter[chapter];if item==nil{item=&canon.ChapterDependencies{ProjectID:request.ProjectID,BranchID:request.BranchID,ChapterVersionID:chapter,CanonVersion:version};byChapter[chapter]=item};switch kind{case "FACT":item.FactIDs=append(item.FactIDs,id);case "ENTITY":item.EntityIDs=append(item.EntityIDs,id);case "EVENT":item.EventIDs=append(item.EventIDs,id);case "CHAPTER_VERSION":item.DependsOnChapterVersionIDs=append(item.DependsOnChapterVersionIDs,id)}};if err=rows.Err();err!=nil{return canon.ImpactResult{},err}
-	memory:=canon.NewMemoryStore();for _,item:=range byChapter{_ = memory.RegisterDependencies(ctx,*item)};result,err:=memory.AnalyzeImpact(ctx,request);if err!=nil||!request.MarkStale{return result,err}
-	tx,err:=s.DB.BeginTx(ctx,nil);if err!=nil{return canon.ImpactResult{},err};defer tx.Rollback();for _,item:=range result.Affected{raw,_:=json.Marshal(item.Reasons);_,err=tx.ExecContext(ctx,`INSERT INTO stale_chapters(project_id,branch_id,chapter_version_id,trigger_canon_version,reasons_json,created_at) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE trigger_canon_version=VALUES(trigger_canon_version),reasons_json=VALUES(reasons_json),created_at=VALUES(created_at)`,item.ProjectID,item.BranchID,item.ChapterVersionID,item.TriggerCanonVersion,raw,item.CreatedAt);if err!=nil{return canon.ImpactResult{},err}};if err=tx.Commit();err!=nil{return canon.ImpactResult{},err};return result,nil
+func (s CanonStore) AnalyzeImpact(ctx context.Context, request canon.ImpactRequest) (canon.ImpactResult, error) {
+	request.ProjectID, request.BranchID = strings.TrimSpace(request.ProjectID), canonBranch(request.BranchID)
+	if request.ProjectID == "" {
+		return canon.ImpactResult{}, fmt.Errorf("%w: projectId is required", canon.ErrInvalid)
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT chapter_version_id,canon_version,dependency_kind,dependency_id FROM chapter_dependencies WHERE project_id=? AND branch_id=?`, request.ProjectID, request.BranchID)
+	if err != nil {
+		return canon.ImpactResult{}, err
+	}
+	defer rows.Close()
+	byChapter := map[string]*canon.ChapterDependencies{}
+	for rows.Next() {
+		var chapter, kind, id string
+		var version int64
+		if err := rows.Scan(&chapter, &version, &kind, &id); err != nil {
+			return canon.ImpactResult{}, err
+		}
+		item := byChapter[chapter]
+		if item == nil {
+			item = &canon.ChapterDependencies{ProjectID: request.ProjectID, BranchID: request.BranchID, ChapterVersionID: chapter, CanonVersion: version}
+			byChapter[chapter] = item
+		}
+		switch kind {
+		case "FACT":
+			item.FactIDs = append(item.FactIDs, id)
+		case "ENTITY":
+			item.EntityIDs = append(item.EntityIDs, id)
+		case "EVENT":
+			item.EventIDs = append(item.EventIDs, id)
+		case "CHAPTER_VERSION":
+			item.DependsOnChapterVersionIDs = append(item.DependsOnChapterVersionIDs, id)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return canon.ImpactResult{}, err
+	}
+	memory := canon.NewMemoryStore()
+	for _, item := range byChapter {
+		_ = memory.RegisterDependencies(ctx, *item)
+	}
+	result, err := memory.AnalyzeImpact(ctx, request)
+	if err != nil || !request.MarkStale {
+		return result, err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return canon.ImpactResult{}, err
+	}
+	defer tx.Rollback()
+	for _, item := range result.Affected {
+		raw, _ := json.Marshal(item.Reasons)
+		_, err = tx.ExecContext(ctx, `INSERT INTO stale_chapters(project_id,branch_id,chapter_version_id,trigger_canon_version,reasons_json,created_at) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE trigger_canon_version=VALUES(trigger_canon_version),reasons_json=VALUES(reasons_json),created_at=VALUES(created_at)`, item.ProjectID, item.BranchID, item.ChapterVersionID, item.TriggerCanonVersion, raw, item.CreatedAt)
+		if err != nil {
+			return canon.ImpactResult{}, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return canon.ImpactResult{}, err
+	}
+	return result, nil
 }
 
-func (s CanonStore) ListStale(ctx context.Context, projectID, branchID string)([]canon.StaleChapter,error){rows,err:=s.DB.QueryContext(ctx,`SELECT project_id,branch_id,chapter_version_id,trigger_canon_version,reasons_json,created_at FROM stale_chapters WHERE project_id=? AND branch_id=? ORDER BY created_at DESC`,projectID,canonBranch(branchID));if err!=nil{return nil,err};defer rows.Close();items:=[]canon.StaleChapter{};for rows.Next(){var item canon.StaleChapter;var raw []byte;if err:=rows.Scan(&item.ProjectID,&item.BranchID,&item.ChapterVersionID,&item.TriggerCanonVersion,&raw,&item.CreatedAt);err!=nil{return nil,err};_ = json.Unmarshal(raw,&item.Reasons);items=append(items,item)};return items,rows.Err()}
+func (s CanonStore) ListStale(ctx context.Context, projectID, branchID string) ([]canon.StaleChapter, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT project_id,branch_id,chapter_version_id,trigger_canon_version,reasons_json,created_at FROM stale_chapters WHERE project_id=? AND branch_id=? ORDER BY created_at DESC`, projectID, canonBranch(branchID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []canon.StaleChapter{}
+	for rows.Next() {
+		var item canon.StaleChapter
+		var raw []byte
+		if err := rows.Scan(&item.ProjectID, &item.BranchID, &item.ChapterVersionID, &item.TriggerCanonVersion, &raw, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(raw, &item.Reasons)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

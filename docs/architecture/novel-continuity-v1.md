@@ -46,6 +46,9 @@ V1 聚焦单部小说、单条主线和人工批准，先完成一章从章节�
 
 - `GET /api/v1/projects/{id}/canon?branchId=main`：读取当前 Canon 版本与实体状态。
 - `POST /api/v1/projects/{id}/canon/commits`：原子提交实体、事实、事件和状态变化。
+- `PUT /api/v1/projects/{id}/chapter-versions/{versionId}/dependencies`：登记章节所使用的事实、实体、事件和上游章节。
+- `POST /api/v1/projects/{id}/impact-analysis`：计算直接及传递影响；`markStale=true` 时持久化结果。
+- `GET /api/v1/projects/{id}/stale-chapters?branchId=main`：列出需要重新审查的章节版本。
 
 提交接口在版本过期或 `before` 状态不匹配时返回 `409 CANON_CONFLICT`；缺少证据或引用未知实体时返回 `422 INVALID_CANON_CHANGE`。
 

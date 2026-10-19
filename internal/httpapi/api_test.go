@@ -84,6 +84,33 @@ func TestCanonCommitAndState(t *testing.T) {
 	}
 }
 
+func TestChapterImpactAnalysisMarksTransitiveDependenciesStale(t *testing.T) {
+	projects := project.NewMemoryStore()
+	handler := httpapi.New(projects, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	items, _ := projects.List(context.Background())
+	projectID := items[0].ID
+	register := func(chapter, body string) {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/projects/"+projectID+"/chapter-versions/"+chapter+"/dependencies", bytes.NewBufferString(body)))
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("register %s status=%d body=%s", chapter, response.Code, response.Body.String())
+		}
+	}
+	register("ch7", `{"canonVersion":2,"factIds":["fact-injury"]}`)
+	register("ch9", `{"canonVersion":3,"dependsOnChapterVersionIds":["ch7"]}`)
+	register("ch12", `{"canonVersion":4,"dependsOnChapterVersionIds":["ch9"]}`)
+	impact := httptest.NewRecorder()
+	handler.ServeHTTP(impact, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/impact-analysis", bytes.NewBufferString(`{"triggerCanonVersion":5,"changedFactIds":["fact-injury"],"markStale":true}`)))
+	if impact.Code != http.StatusOK || !strings.Contains(impact.Body.String(), `"ch12"`) {
+		t.Fatalf("impact status=%d body=%s", impact.Code, impact.Body.String())
+	}
+	stale := httptest.NewRecorder()
+	handler.ServeHTTP(stale, httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID+"/stale-chapters", nil))
+	if stale.Code != http.StatusOK || !strings.Contains(stale.Body.String(), `"total":3`) {
+		t.Fatalf("stale status=%d body=%s", stale.Code, stale.Body.String())
+	}
+}
+
 func TestUpdateProject(t *testing.T) {
 	handler := httpapi.New(project.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	create := httptest.NewRecorder()

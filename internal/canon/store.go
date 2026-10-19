@@ -33,15 +33,17 @@ type branchState struct {
 	values   map[string]map[string]any
 }
 type MemoryStore struct {
-	mu       sync.RWMutex
-	sequence atomic.Uint64
-	branches map[string]*branchState
+	mu           sync.RWMutex
+	sequence     atomic.Uint64
+	branches     map[string]*branchState
 	dependencies map[string]ChapterDependencies
-	stale map[string]StaleChapter
+	stale        map[string]StaleChapter
 }
 
-func NewMemoryStore() *MemoryStore { return &MemoryStore{branches: map[string]*branchState{}, dependencies: map[string]ChapterDependencies{}, stale: map[string]StaleChapter{}} }
-func key(p, b string) string       { return p + "\x00" + branch(b) }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{branches: map[string]*branchState{}, dependencies: map[string]ChapterDependencies{}, stale: map[string]StaleChapter{}}
+}
+func key(p, b string) string { return p + "\x00" + branch(b) }
 func branch(v string) string {
 	if v = strings.TrimSpace(v); v != "" {
 		return v
