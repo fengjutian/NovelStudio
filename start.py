@@ -85,7 +85,7 @@ def main() -> int:
 
         print("\nNovelStudio 正在运行：")
         if not args.web_only:
-            print("  API: http://localhost:8081")
+            print("  API: http://localhost:8086")
         if not args.api_only:
             print("  Web: http://localhost:5173")
         print("按 Ctrl+C 停止全部服务。\n")

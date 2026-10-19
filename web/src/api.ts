@@ -9,7 +9,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     })
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`无法连接 Go API（localhost:8081），请先启动或重启服务。${detail === 'Failed to fetch' ? '' : ` ${detail}`}`)
+    throw new Error(`无法连接 Go API（localhost:8086），请先启动或重启服务。${detail === 'Failed to fetch' ? '' : ` ${detail}`}`)
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null)

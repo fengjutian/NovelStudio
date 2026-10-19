@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:8081', '/healthz': 'http://localhost:8081' },
+    proxy: { '/api': 'http://localhost:8086', '/healthz': 'http://localhost:8086' },
   },
   build: {
     chunkSizeWarningLimit: 550,

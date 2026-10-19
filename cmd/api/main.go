@@ -29,7 +29,7 @@ import (
 
 func main() {
 	loadEnvFile(".env")
-	addr := env("HTTP_ADDR", ":8081")
+	addr := env("HTTP_ADDR", ":8086")
 	applyLocalModelConfig()
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
 	defer closeStore()
