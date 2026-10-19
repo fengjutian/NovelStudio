@@ -24,6 +24,15 @@ func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
 	return err
 }
 
+func (s ProjectStore) ProjectIDForNode(ctx context.Context, id string) (string, error) {
+	var projectID string
+	err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM content_nodes WHERE id=?`, id).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", project.ErrNotFound
+	}
+	return projectID, err
+}
+
 func (s ProjectStore) CreateNode(ctx context.Context, projectID string, input project.CreateNodeInput) (project.ContentNode, error) {
 	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.NodeType) == "" {
 		return project.ContentNode{}, errors.New("title and nodeType are required")

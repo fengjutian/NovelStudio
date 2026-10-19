@@ -59,6 +59,31 @@ func TestRejectsUnsupportedProjectType(t *testing.T) {
 	}
 }
 
+func TestCanonCommitAndState(t *testing.T) {
+	projects := project.NewMemoryStore()
+	handler := httpapi.New(projects, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	items, _ := projects.List(context.Background())
+	projectID := items[0].ID
+	body := `{"baseCanonVersion":0,"chapterVersionId":"ver_1","approvedBy":"author","entities":[{"id":"char_1","type":"CHARACTER","name":"林川"}],"transitions":[{"id":"state_1","entityId":"char_1","field":"health","before":null,"after":"injured","storyTime":"day-1","source":{"documentVersionId":"ver_1","startOffset":1,"endOffset":4}}]}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/canon/commits", bytes.NewBufferString(body)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("commit status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	state := httptest.NewRecorder()
+	handler.ServeHTTP(state, httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID+"/canon", nil))
+	if state.Code != http.StatusOK || !strings.Contains(state.Body.String(), `"health":"injured"`) {
+		t.Fatalf("state status=%d body=%s", state.Code, state.Body.String())
+	}
+
+	conflict := httptest.NewRecorder()
+	handler.ServeHTTP(conflict, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/canon/commits", bytes.NewBufferString(body)))
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+}
+
 func TestUpdateProject(t *testing.T) {
 	handler := httpapi.New(project.NewMemoryStore(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	create := httptest.NewRecorder()

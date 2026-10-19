@@ -13,6 +13,7 @@ import (
 
 	"novelstudio/internal/airun"
 	"novelstudio/internal/auth"
+	"novelstudio/internal/canon"
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/httpapi"
@@ -31,7 +32,7 @@ func main() {
 	loadEnvFile(".env")
 	addr := env("HTTP_ADDR", ":8086")
 	applyLocalModelConfig()
-	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, taskManager, closeStore := stores()
+	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, canonStore, taskManager, closeStore := stores()
 	defer closeStore()
 	if err := seedDefaultUser(authStore); err != nil {
 		slog.Error("cannot create default user", "error", err)
@@ -45,7 +46,7 @@ func main() {
 	}
 	pipeline := validationPipeline(runRecorder)
 	generator := generationService(runRecorder)
-	handler := httpapi.NewWithRuntimeAuth(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, authStore, slog.Default())
+	handler := httpapi.NewWithRuntimeAuthAndCanon(projectStore, documentStore, knowledgeStore, pipeline, generator, taskManager, runRecorder, qualityStore, authStore, canonStore, slog.Default())
 
 	server := &http.Server{
 		Addr:              addr,
@@ -211,11 +212,11 @@ func modelRequestTimeout() time.Duration {
 	return timeout
 }
 
-func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, auth.Store, *task.Manager, func()) {
+func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, qualityhistory.Store, auth.Store, canon.Store, *task.Manager, func()) {
 	dsn := strings.TrimSpace(os.Getenv("MYSQL_DSN"))
 	if dsn == "" {
 		slog.Warn("MYSQL_DSN is empty; using volatile in-memory storage")
-		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), qualityhistory.NewMemoryStore(), auth.NewMemoryStore(), task.NewManager(), func() {}
+		return project.NewMemoryStore(), document.NewMemoryStore(), knowledge.NewMemoryStore(), airun.NewMemoryRecorder(), qualityhistory.NewMemoryStore(), auth.NewMemoryStore(), canon.NewMemoryStore(), task.NewManager(), func() {}
 	}
 	db, err := mysqlstore.Open(context.Background(), dsn)
 	if err != nil {
@@ -228,7 +229,7 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, q
 		os.Exit(1)
 	}
 	slog.Info("MySQL persistence enabled")
-	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, mysqlstore.AuthStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
+	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, mysqlstore.AuthStore{DB: db}, mysqlstore.CanonStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
 func seedDefaultUser(store auth.Store) error {

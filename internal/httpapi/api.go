@@ -22,6 +22,7 @@ import (
 
 	"novelstudio/internal/airun"
 	"novelstudio/internal/auth"
+	"novelstudio/internal/canon"
 	"novelstudio/internal/document"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/knowledge"
@@ -46,6 +47,7 @@ type API struct {
 	quality     qualityhistory.Store
 	modelConfig modelconfig.Store
 	auth        auth.Store
+	canon       canon.Store
 }
 
 func New(store project.Store, logger *slog.Logger) http.Handler {
@@ -64,12 +66,15 @@ func NewWithServices(store project.Store, docs document.Store, knowledgeStore kn
 	return NewWithRuntime(store, docs, knowledgeStore, pipeline, generator, task.NewManager(), nil, nil, logger)
 }
 func NewWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, logger *slog.Logger) http.Handler {
-	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, nil, logger)
+	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, nil, canon.NewMemoryStore(), logger)
 }
 func NewWithRuntimeAuth(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, logger *slog.Logger) http.Handler {
-	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, authStore, logger)
+	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, authStore, canon.NewMemoryStore(), logger)
 }
-func newWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, logger *slog.Logger) http.Handler {
+func NewWithRuntimeAuthAndCanon(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, canonStore canon.Store, logger *slog.Logger) http.Handler {
+	return newWithRuntime(store, docs, knowledgeStore, pipeline, generator, tasks, runs, quality, authStore, canonStore, logger)
+}
+func newWithRuntime(store project.Store, docs document.Store, knowledgeStore knowledge.Store, pipeline *validation.Pipeline, generator *generation.Service, tasks *task.Manager, runs airun.Recorder, quality qualityhistory.Store, authStore auth.Store, canonStore canon.Store, logger *slog.Logger) http.Handler {
 	if tasks == nil {
 		tasks = task.NewManager()
 	}
@@ -77,7 +82,10 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	if configPath == "" {
 		configPath = filepath.Join(".local", "model-config.json")
 	}
-	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, auth: authStore, modelConfig: modelconfig.Store{Path: configPath}, logger: logger}
+	if canonStore == nil {
+		canonStore = canon.NewMemoryStore()
+	}
+	a := &API{store: store, docs: docs, knowledge: knowledgeStore, pipeline: pipeline, generator: generator, tasks: tasks, runs: runs, quality: quality, auth: authStore, canon: canonStore, modelConfig: modelconfig.Store{Path: configPath}, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("POST /api/v1/auth/register", a.register)
@@ -130,6 +138,8 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("POST /api/v1/models/local-config/test", a.testLocalModelConfig)
 	mux.HandleFunc("GET /api/v1/projects/{id}/ai-runs", a.listAIRuns)
 	mux.HandleFunc("GET /api/v1/projects/{id}/quality-results", a.listQualityResults)
+	mux.HandleFunc("GET /api/v1/projects/{id}/canon", a.getCanon)
+	mux.HandleFunc("POST /api/v1/projects/{id}/canon/commits", a.commitCanon)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
@@ -1509,6 +1519,57 @@ func (a *API) getProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (a *API) getCanon(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	branchID := r.URL.Query().Get("branchId")
+	version, err := a.canon.Version(r.Context(), projectID, branchID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	state, err := a.canon.State(r.Context(), projectID, branchID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if strings.TrimSpace(branchID) == "" {
+		branchID = "main"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projectId": projectID, "branchId": branchID, "version": version, "state": state})
+}
+
+func (a *API) commitCanon(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, err := a.store.Get(r.Context(), projectID); err != nil {
+		a.handleStoreError(w, err)
+		return
+	}
+	var input canon.ChangeSet
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.ProjectID != "" && input.ProjectID != projectID {
+		writeError(w, http.StatusBadRequest, "PROJECT_MISMATCH", "projectId must match request path")
+		return
+	}
+	input.ProjectID = projectID
+	commit, err := a.canon.Commit(r.Context(), input)
+	switch {
+	case errors.Is(err, canon.ErrConflict):
+		writeError(w, http.StatusConflict, "CANON_CONFLICT", err.Error())
+	case errors.Is(err, canon.ErrInvalid), errors.Is(err, canon.ErrUnknownRef):
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_CANON_CHANGE", err.Error())
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+	default:
+		writeJSON(w, http.StatusCreated, commit)
+	}
 }
 
 func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {

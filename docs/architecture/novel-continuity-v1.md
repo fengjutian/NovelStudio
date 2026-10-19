@@ -42,3 +42,10 @@ V1 聚焦单部小说、单条主线和人工批准，先完成一章从章节�
 4. Context Manifest 接入生成流程。
 5. 确定性规则、人工标注回归集和审批工作台。
 
+## 已实现 API
+
+- `GET /api/v1/projects/{id}/canon?branchId=main`：读取当前 Canon 版本与实体状态。
+- `POST /api/v1/projects/{id}/canon/commits`：原子提交实体、事实、事件和状态变化。
+
+提交接口在版本过期或 `before` 状态不匹配时返回 `409 CANON_CONFLICT`；缺少证据或引用未知实体时返回 `422 INVALID_CANON_CHANGE`。
+
