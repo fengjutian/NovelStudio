@@ -25,6 +25,7 @@ type Store interface {
 	RegisterDependencies(context.Context, ChapterDependencies) error
 	AnalyzeImpact(context.Context, ImpactRequest) (ImpactResult, error)
 	ListStale(context.Context, string, string) ([]StaleChapter, error)
+	ResolveStale(context.Context, string, string, string, ResolveStaleInput) (StaleChapter, error)
 }
 type branchState struct {
 	version  int64

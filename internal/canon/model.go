@@ -116,9 +116,20 @@ type StaleChapter struct {
 	ChapterVersionID    string    `json:"chapterVersionId"`
 	TriggerCanonVersion int64     `json:"triggerCanonVersion"`
 	Reasons             []string  `json:"reasons"`
+	Paths               [][]string `json:"paths,omitempty"`
+	Status              string    `json:"status"`
 	CreatedAt           time.Time `json:"createdAt"`
+	ResolvedAt          *time.Time `json:"resolvedAt,omitempty"`
+	ResolvedBy          string    `json:"resolvedBy,omitempty"`
+	ResolutionNote      string    `json:"resolutionNote,omitempty"`
 }
 
 type ImpactResult struct {
 	Affected []StaleChapter `json:"affected"`
+}
+
+type ResolveStaleInput struct {
+	Status string `json:"status"`
+	ResolvedBy string `json:"resolvedBy"`
+	Note string `json:"note,omitempty"`
 }

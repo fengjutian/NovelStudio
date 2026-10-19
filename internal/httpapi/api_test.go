@@ -109,6 +109,7 @@ func TestChapterImpactAnalysisMarksTransitiveDependenciesStale(t *testing.T) {
 	if stale.Code != http.StatusOK || !strings.Contains(stale.Body.String(), `"total":3`) {
 		t.Fatalf("stale status=%d body=%s", stale.Code, stale.Body.String())
 	}
+	resolved:=httptest.NewRecorder();handler.ServeHTTP(resolved,httptest.NewRequest(http.MethodPost,"/api/v1/projects/"+projectID+"/stale-chapters/ch12/resolve",bytes.NewBufferString(`{"status":"VALID","resolvedBy":"author","note":"review passed"}`)));if resolved.Code!=http.StatusOK||!strings.Contains(resolved.Body.String(),`"status":"VALID"`){t.Fatalf("resolve status=%d body=%s",resolved.Code,resolved.Body.String())}
 }
 
 func TestUpdateProject(t *testing.T) {

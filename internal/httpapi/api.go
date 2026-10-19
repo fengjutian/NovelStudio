@@ -143,6 +143,7 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("PUT /api/v1/projects/{id}/chapter-versions/{versionId}/dependencies", a.registerChapterDependencies)
 	mux.HandleFunc("POST /api/v1/projects/{id}/impact-analysis", a.analyzeImpact)
 	mux.HandleFunc("GET /api/v1/projects/{id}/stale-chapters", a.listStaleChapters)
+	mux.HandleFunc("POST /api/v1/projects/{id}/stale-chapters/{versionId}/resolve", a.resolveStaleChapter)
 	mux.HandleFunc("POST /api/v1/projects/{id}/validate", a.validateText)
 	mux.HandleFunc("GET /api/v1/projects/{id}/tasks", a.listTasks)
 	mux.HandleFunc("GET /api/v1/tasks", a.listAllTasks)
@@ -1624,6 +1625,10 @@ func (a *API) listStaleChapters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+}
+
+func (a *API) resolveStaleChapter(w http.ResponseWriter, r *http.Request) {
+	projectID:=r.PathValue("id");if _,err:=a.store.Get(r.Context(),projectID);err!=nil{a.handleStoreError(w,err);return};var input canon.ResolveStaleInput;if !decodeJSON(w,r,&input){return};item,err:=a.canon.ResolveStale(r.Context(),projectID,r.URL.Query().Get("branchId"),r.PathValue("versionId"),input);switch{case errors.Is(err,canon.ErrUnknownRef):writeError(w,http.StatusNotFound,"NOT_FOUND",err.Error());case errors.Is(err,canon.ErrInvalid):writeError(w,http.StatusUnprocessableEntity,"INVALID_STALE_TRANSITION",err.Error());case err!=nil:writeError(w,http.StatusInternalServerError,"INTERNAL_ERROR",err.Error());default:writeJSON(w,http.StatusOK,item)}
 }
 
 func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
