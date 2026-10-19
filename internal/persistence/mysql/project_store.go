@@ -15,6 +15,15 @@ type ProjectStore struct{ DB *sql.DB }
 
 var _ project.Store = ProjectStore{}
 
+func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return errors.New("ownerID is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE projects SET owner_id=?,updated_at=? WHERE owner_id IS NULL`, ownerID, time.Now().UTC())
+	return err
+}
+
 func (s ProjectStore) CreateNode(ctx context.Context, projectID string, input project.CreateNodeInput) (project.ContentNode, error) {
 	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.NodeType) == "" {
 		return project.ContentNode{}, errors.New("title and nodeType are required")
