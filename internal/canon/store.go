@@ -22,6 +22,9 @@ type Store interface {
 	Version(context.Context, string, string) (int64, error)
 	Commit(context.Context, ChangeSet) (Commit, error)
 	State(context.Context, string, string) (map[string]map[string]any, error)
+	RegisterDependencies(context.Context, ChapterDependencies) error
+	AnalyzeImpact(context.Context, ImpactRequest) (ImpactResult, error)
+	ListStale(context.Context, string, string) ([]StaleChapter, error)
 }
 type branchState struct {
 	version  int64
@@ -33,9 +36,11 @@ type MemoryStore struct {
 	mu       sync.RWMutex
 	sequence atomic.Uint64
 	branches map[string]*branchState
+	dependencies map[string]ChapterDependencies
+	stale map[string]StaleChapter
 }
 
-func NewMemoryStore() *MemoryStore { return &MemoryStore{branches: map[string]*branchState{}} }
+func NewMemoryStore() *MemoryStore { return &MemoryStore{branches: map[string]*branchState{}, dependencies: map[string]ChapterDependencies{}, stale: map[string]StaleChapter{}} }
 func key(p, b string) string       { return p + "\x00" + branch(b) }
 func branch(v string) string {
 	if v = strings.TrimSpace(v); v != "" {

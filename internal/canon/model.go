@@ -87,3 +87,38 @@ type Commit struct {
 	ApprovedBy       string    `json:"approvedBy"`
 	CreatedAt        time.Time `json:"createdAt"`
 }
+
+type ChapterDependencies struct {
+	ProjectID                  string   `json:"projectId"`
+	BranchID                   string   `json:"branchId"`
+	ChapterVersionID           string   `json:"chapterVersionId"`
+	CanonVersion               int64    `json:"canonVersion"`
+	FactIDs                    []string `json:"factIds,omitempty"`
+	EntityIDs                  []string `json:"entityIds,omitempty"`
+	EventIDs                   []string `json:"eventIds,omitempty"`
+	DependsOnChapterVersionIDs []string `json:"dependsOnChapterVersionIds,omitempty"`
+}
+
+type ImpactRequest struct {
+	ProjectID               string   `json:"projectId"`
+	BranchID                string   `json:"branchId"`
+	TriggerCanonVersion     int64    `json:"triggerCanonVersion"`
+	ChangedFactIDs          []string `json:"changedFactIds,omitempty"`
+	ChangedEntityIDs        []string `json:"changedEntityIds,omitempty"`
+	ChangedEventIDs         []string `json:"changedEventIds,omitempty"`
+	ChangedChapterVersionIDs []string `json:"changedChapterVersionIds,omitempty"`
+	MarkStale               bool     `json:"markStale"`
+}
+
+type StaleChapter struct {
+	ProjectID              string    `json:"projectId"`
+	BranchID               string    `json:"branchId"`
+	ChapterVersionID       string    `json:"chapterVersionId"`
+	TriggerCanonVersion    int64     `json:"triggerCanonVersion"`
+	Reasons                []string  `json:"reasons"`
+	CreatedAt              time.Time `json:"createdAt"`
+}
+
+type ImpactResult struct {
+	Affected []StaleChapter `json:"affected"`
+}
