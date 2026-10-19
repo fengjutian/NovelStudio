@@ -126,7 +126,7 @@ func validate(cur *branchState, c ChangeSet) error {
 		events[id] = true
 	}
 	for _, x := range c.Events {
-		if x.ID == "" || x.StoryTime == "" || x.Description == "" || events[x.ID] || !evidence(x.Source, c.ChapterVersionID) {
+		if x.ID == "" || seen[x.ID] || x.StoryTime == "" || x.Description == "" || events[x.ID] || !evidence(x.Source, c.ChapterVersionID) {
 			return fmt.Errorf("%w: invalid event", ErrInvalid)
 		}
 		if x.LocationID != "" && !entities[x.LocationID] {
@@ -138,17 +138,20 @@ func validate(cur *branchState, c ChangeSet) error {
 			}
 		}
 		events[x.ID] = true
+		seen[x.ID] = true
 	}
 	for _, x := range c.Facts {
-		if x.ID == "" || x.Predicate == "" || !entities[x.SubjectID] || !evidence(x.Source, c.ChapterVersionID) {
+		if x.ID == "" || seen[x.ID] || x.Predicate == "" || !entities[x.SubjectID] || !evidence(x.Source, c.ChapterVersionID) {
 			return fmt.Errorf("%w: invalid fact", ErrInvalid)
 		}
+		seen[x.ID] = true
 	}
 	working := cloneState(cur.values)
 	for _, x := range c.Transitions {
-		if x.ID == "" || x.Field == "" || x.StoryTime == "" || !entities[x.EntityID] || !evidence(x.Source, c.ChapterVersionID) {
+		if x.ID == "" || seen[x.ID] || x.Field == "" || x.StoryTime == "" || !entities[x.EntityID] || !evidence(x.Source, c.ChapterVersionID) {
 			return fmt.Errorf("%w: invalid state transition", ErrInvalid)
 		}
+		seen[x.ID] = true
 		if x.EventID != "" && !events[x.EventID] {
 			return ErrUnknownRef
 		}

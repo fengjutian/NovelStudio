@@ -80,6 +80,7 @@ func (s CanonStore) Commit(ctx context.Context, change canon.ChangeSet) (canon.C
 		return canon.Commit{}, fmt.Errorf("%w: chapter version is not part of project", canon.ErrInvalid)
 	}
 	known := map[string]bool{}
+	seen := map[string]bool{}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM story_entities WHERE project_id=?`, change.ProjectID)
 	if err != nil {
 		return canon.Commit{}, err
@@ -91,10 +92,11 @@ func (s CanonStore) Commit(ctx context.Context, change canon.ChangeSet) (canon.C
 	}
 	rows.Close()
 	for _, e := range change.Entities {
-		if e.ID == "" || e.Name == "" || e.Type == "" || known[e.ID] {
+		if e.ID == "" || e.Name == "" || e.Type == "" || known[e.ID] || seen[e.ID] {
 			return canon.Commit{}, fmt.Errorf("%w: invalid or duplicate entity", canon.ErrInvalid)
 		}
 		known[e.ID] = true
+		seen[e.ID] = true
 	}
 	events := map[string]bool{}
 	rows, err = tx.QueryContext(ctx, `SELECT id FROM story_events_v2 WHERE project_id=? AND branch_id=?`, change.ProjectID, change.BranchID)
@@ -111,7 +113,7 @@ func (s CanonStore) Commit(ctx context.Context, change canon.ChangeSet) (canon.C
 		return e.DocumentVersionID == change.ChapterVersionID && e.StartOffset >= 0 && e.EndOffset > e.StartOffset
 	}
 	for _, e := range change.Events {
-		if e.ID == "" || e.StoryTime == "" || e.Description == "" || events[e.ID] || !validEvidence(e.Source) {
+		if e.ID == "" || seen[e.ID] || e.StoryTime == "" || e.Description == "" || events[e.ID] || !validEvidence(e.Source) {
 			return canon.Commit{}, fmt.Errorf("%w: invalid event", canon.ErrInvalid)
 		}
 		if e.LocationID != "" && !known[e.LocationID] {
@@ -123,20 +125,23 @@ func (s CanonStore) Commit(ctx context.Context, change canon.ChangeSet) (canon.C
 			}
 		}
 		events[e.ID] = true
+		seen[e.ID] = true
 	}
 	for _, f := range change.Facts {
-		if f.ID == "" || f.Predicate == "" || !known[f.SubjectID] || !validEvidence(f.Source) {
+		if f.ID == "" || seen[f.ID] || f.Predicate == "" || !known[f.SubjectID] || !validEvidence(f.Source) {
 			return canon.Commit{}, fmt.Errorf("%w: invalid fact", canon.ErrInvalid)
 		}
+		seen[f.ID] = true
 	}
 	state, err := stateTx(ctx, tx, change.ProjectID, change.BranchID)
 	if err != nil {
 		return canon.Commit{}, err
 	}
 	for _, tr := range change.Transitions {
-		if tr.ID == "" || tr.Field == "" || tr.StoryTime == "" || !known[tr.EntityID] || !validEvidence(tr.Source) {
+		if tr.ID == "" || seen[tr.ID] || tr.Field == "" || tr.StoryTime == "" || !known[tr.EntityID] || !validEvidence(tr.Source) {
 			return canon.Commit{}, fmt.Errorf("%w: invalid transition", canon.ErrInvalid)
 		}
+		seen[tr.ID] = true
 		if tr.EventID != "" && !events[tr.EventID] {
 			return canon.Commit{}, canon.ErrUnknownRef
 		}
