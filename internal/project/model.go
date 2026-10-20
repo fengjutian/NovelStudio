@@ -21,6 +21,7 @@ type ContentType struct {
 	Icon        string    `json:"icon"`
 	Accent      string    `json:"accent"`
 	Description string    `json:"description"`
+	Roles       string    `json:"roles"`
 	Prompt      string    `json:"prompt"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -32,6 +33,7 @@ type CreateContentTypeInput struct {
 	Icon        string `json:"icon"`
 	Accent      string `json:"accent"`
 	Description string `json:"description"`
+	Roles       string `json:"roles"`
 	Prompt      string `json:"prompt"`
 }
 
@@ -40,6 +42,7 @@ type UpdateContentTypeInput struct {
 	Icon        string `json:"icon"`
 	Accent      string `json:"accent"`
 	Description string `json:"description"`
+	Roles       string `json:"roles"`
 	Prompt      string `json:"prompt"`
 }
 

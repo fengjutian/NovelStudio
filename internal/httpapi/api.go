@@ -1410,7 +1410,14 @@ func (a *API) contentTypePrompt(ctx context.Context, code project.Type) string {
 	}
 	for _, item := range items {
 		if item.Code == code {
-			return item.Prompt
+			parts := []string{}
+			if strings.TrimSpace(item.Prompt) != "" {
+				parts = append(parts, "内容类型生成规范：\n"+item.Prompt)
+			}
+			if strings.TrimSpace(item.Roles) != "" {
+				parts = append(parts, "人物与任务角色设定：\n"+item.Roles+"\n生成内容时必须保持角色身份、目标、关系、能力边界、语言特征和人物弧光一致；资料未提供的角色事实不得擅自补全。")
+			}
+			return strings.Join(parts, "\n\n")
 		}
 	}
 	return ""

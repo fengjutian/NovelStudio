@@ -229,7 +229,7 @@ func (s *MemoryStore) ListContentTypes(_ context.Context) ([]ContentType, error)
 	return items, nil
 }
 
-func NormalizeContentType(code Type, name, icon, accent, description, prompt string) (ContentType, error) {
+func NormalizeContentType(code Type, name, icon, accent, description, roles, prompt string) (ContentType, error) {
 	code = Type(strings.ToUpper(strings.TrimSpace(string(code))))
 	name, icon, accent = strings.TrimSpace(name), strings.TrimSpace(icon), strings.ToLower(strings.TrimSpace(accent))
 	if code == "" || name == "" {
@@ -246,17 +246,20 @@ func NormalizeContentType(code Type, name, icon, accent, description, prompt str
 	if len(prompt) > 12000 {
 		return ContentType{}, errors.New("prompt is too long")
 	}
+	if len(roles) > 6000 {
+		return ContentType{}, errors.New("roles is too long")
+	}
 	if icon == "" {
 		icon = string([]rune(name)[0])
 	}
 	if accent == "" {
 		accent = "amber"
 	}
-	return ContentType{Code: code, Name: name, Icon: icon, Accent: accent, Description: strings.TrimSpace(description), Prompt: strings.TrimSpace(prompt)}, nil
+	return ContentType{Code: code, Name: name, Icon: icon, Accent: accent, Description: strings.TrimSpace(description), Roles: strings.TrimSpace(roles), Prompt: strings.TrimSpace(prompt)}, nil
 }
 
 func (s *MemoryStore) CreateContentType(_ context.Context, input CreateContentTypeInput) (ContentType, error) {
-	item, err := NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
+	item, err := NormalizeContentType(input.Code, input.Name, input.Icon, input.Accent, input.Description, input.Roles, input.Prompt)
 	if err != nil {
 		return ContentType{}, err
 	}
@@ -278,7 +281,7 @@ func (s *MemoryStore) UpdateContentType(_ context.Context, code Type, input Upda
 	if !ok {
 		return ContentType{}, ErrContentTypeNotFound
 	}
-	item, err := NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description, input.Prompt)
+	item, err := NormalizeContentType(code, input.Name, input.Icon, input.Accent, input.Description, input.Roles, input.Prompt)
 	if err != nil {
 		return ContentType{}, err
 	}

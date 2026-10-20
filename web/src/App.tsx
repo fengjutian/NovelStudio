@@ -257,9 +257,10 @@ function ContentTypeManager(){
   const[icon,setIcon]=useState('')
   const[accent,setAccent]=useState('amber')
   const[description,setDescription]=useState('')
+  const[roles,setRoles]=useState('')
   const[prompt,setPrompt]=useState('')
-  const reset=(item?:ContentType)=>{setEditing(item??null);setCode(item?.code??'');setName(item?.name??'');setIcon(item?.icon??'');setAccent(item?.accent??'amber');setDescription(item?.description??'');setPrompt(item?.prompt??'');setOpen(true)}
-  const save=useMutation({mutationFn:()=>editing?api.updateContentType(editing.code,{name,icon,accent,description,prompt}):api.createContentType({code,name,icon,accent,description,prompt}),onSuccess:()=>{toast.success(editing?'内容类型已更新':'内容类型已创建');setOpen(false);queryClient.invalidateQueries({queryKey:['content-types']});queryClient.invalidateQueries({queryKey:['projects']})}})
+  const reset=(item?:ContentType)=>{setEditing(item??null);setCode(item?.code??'');setName(item?.name??'');setIcon(item?.icon??'');setAccent(item?.accent??'amber');setDescription(item?.description??'');setRoles(item?.roles??'');setPrompt(item?.prompt??'');setOpen(true)}
+  const save=useMutation({mutationFn:()=>editing?api.updateContentType(editing.code,{name,icon,accent,description,roles,prompt}):api.createContentType({code,name,icon,accent,description,roles,prompt}),onSuccess:()=>{toast.success(editing?'内容类型已更新':'内容类型已创建');setOpen(false);queryClient.invalidateQueries({queryKey:['content-types']});queryClient.invalidateQueries({queryKey:['projects']})}})
   const remove=useMutation({mutationFn:api.deleteContentType,onSuccess:()=>{toast.success('内容类型已删除');queryClient.invalidateQueries({queryKey:['content-types']})},onError:error=>toast.error(error.message)})
   const submit=(event:FormEvent)=>{event.preventDefault();save.mutate()}
   return <>
@@ -281,6 +282,7 @@ function ContentTypeManager(){
       <label>类型编码<Input required disabled={!!editing} maxLength={40} value={code} onChange={event=>setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g,''))} placeholder="例如：MARKETING_COPY"/></label>
       <label>配色<Select value={accent} onChange={event=>setAccent(event.target.value)}><option value="amber">琥珀色</option><option value="blue">蓝色</option><option value="green">绿色</option><option value="rose">玫红色</option><option value="violet">紫色</option></Select></label>
       <label>类型说明<textarea rows={3} maxLength={500} value={description} onChange={event=>setDescription(event.target.value)} placeholder="说明适用的内容场景"/></label>
+      <label>人物角色<textarea rows={6} maxLength={6000} value={roles} onChange={event=>setRoles(event.target.value)} placeholder={'定义参与内容的人物或任务角色。建议包含：\n- 角色名称与身份\n- 核心目标、动机与冲突\n- 性格、能力与限制\n- 与其他角色的关系\n- 语言特征、秘密和人物弧光'}/><small>角色设定会作为系统级约束自动注入策划、目录、正文、润色、修复、事实抽取和长期记忆任务。</small></label>
       <label>生成提示词<textarea required rows={8} maxLength={12000} value={prompt} onChange={event=>setPrompt(event.target.value)} placeholder="描述该内容类型的结构、风格、事实边界、质量要求和必须遵守的规则"/><small>作为系统级类型规范，自动用于创作简报、目录、正文、润色、修复、事实抽取和长期记忆。</small></label>
       {save.isError&&<p className="form-error">{save.error.message}</p>}
       <div className="dialog-actions"><button type="button" className="secondary" onClick={()=>setOpen(false)}>取消</button><button className="primary" disabled={save.isPending}>{save.isPending?'保存中…':'保存'}</button></div>
