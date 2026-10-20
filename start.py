@@ -46,7 +46,14 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         return
     try:
         if os.name == "nt":
-            process.send_signal(signal.CTRL_BREAK_EVENT)
+            # `go run` and npm.cmd both spawn children. Killing only the wrapper
+            # leaves api.exe/node.exe listening after this script exits.
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
             os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=5)

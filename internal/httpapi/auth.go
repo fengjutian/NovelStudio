@@ -10,6 +10,9 @@ import (
 	"unicode/utf8"
 
 	"novelstudio/internal/auth"
+	"novelstudio/internal/document"
+	"novelstudio/internal/knowledge"
+	"novelstudio/internal/task"
 )
 
 const sessionCookie = "novelstudio_session"
@@ -120,11 +123,59 @@ func (a *API) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, ok := a.currentUser(r); !ok {
+		user, ok := a.currentUser(r)
+		if !ok {
 			writeError(w, 401, "UNAUTHENTICATED", "please sign in")
 			return
 		}
-		user, _ := a.currentUser(r)
 		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), user)))
+	})
+}
+
+func (a *API) requireProjectOwnership(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 4 || parts[0] != "api" || parts[1] != "v1" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		resource, id := parts[2], parts[3]
+		var projectID string
+		var err error
+		switch resource {
+		case "projects":
+			projectID = id
+		case "nodes":
+			projectID, err = a.store.ProjectIDForNode(r.Context(), id)
+		case "documents":
+			var item document.Document
+			item, err = a.docs.Get(r.Context(), id)
+			projectID = item.ProjectID
+		case "facts":
+			projectID, err = a.knowledge.ProjectIDForFact(r.Context(), id)
+		case "memories":
+			projectID, err = a.knowledge.ProjectIDForMemory(r.Context(), id)
+		case "knowledge":
+			if len(parts) >= 5 && parts[3] == "files" {
+				var item knowledge.FileAsset
+				item, err = a.knowledge.GetFileAsset(r.Context(), parts[4])
+				projectID = item.ProjectID
+			}
+		case "tasks":
+			var item task.Task
+			item, err = a.tasks.Get(id)
+			projectID = item.ProjectID
+		}
+		if err != nil {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+			return
+		}
+		if projectID != "" {
+			if _, err := a.store.Get(r.Context(), projectID); err != nil {
+				writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }

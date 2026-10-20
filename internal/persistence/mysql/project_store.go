@@ -16,20 +16,6 @@ type ProjectStore struct{ DB *sql.DB }
 
 var _ project.Store = ProjectStore{}
 
-func (s ProjectStore) ProjectIDForNode(ctx context.Context, id string) (string, error) {
-	var projectID string
-	err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM content_nodes WHERE id=?`, id).Scan(&projectID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", project.ErrNotFound
-	}
-	return projectID, err
-}
-
-func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE projects SET owner_id=? WHERE owner_id IS NULL OR owner_id=''`, ownerID)
-	return err
-}
-
 func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
 	ownerID = strings.TrimSpace(ownerID)
 	if ownerID == "" {

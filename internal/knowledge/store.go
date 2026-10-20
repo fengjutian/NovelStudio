@@ -39,7 +39,9 @@ func (s *MemoryStore) ProjectIDForFact(_ context.Context, id string) (string, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	item, ok := s.facts[id]
-	if !ok { return "", ErrNotFound }
+	if !ok {
+		return "", ErrNotFound
+	}
 	return item.ProjectID, nil
 }
 
@@ -47,7 +49,9 @@ func (s *MemoryStore) ProjectIDForMemory(_ context.Context, id string) (string, 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	item, ok := s.memories[id]
-	if !ok { return "", ErrNotFound }
+	if !ok {
+		return "", ErrNotFound
+	}
 	return item.ProjectID, nil
 }
 

@@ -158,6 +158,7 @@ func newWithRuntime(store project.Store, docs document.Store, knowledgeStore kno
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", a.taskEvents)
 	var handler http.Handler = mux
 	if authStore != nil {
+		handler = a.requireProjectOwnership(handler)
 		handler = a.requireAuth(handler)
 	}
 	return recoverer(logger, requestLogger(logger, cors(handler)))
@@ -286,7 +287,13 @@ func (a *API) listKnowledgeFiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	visible := items[:0]
+	for _, item := range items {
+		if _, ownerErr := a.store.Get(r.Context(), item.ProjectID); ownerErr == nil {
+			visible = append(visible, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "total": len(visible)})
 }
 func (a *API) downloadKnowledgeFile(w http.ResponseWriter, r *http.Request) {
 	item, err := a.knowledge.GetFileAsset(r.Context(), r.PathValue("id"))
@@ -1281,9 +1288,15 @@ func (a *API) listTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
-func (a *API) listAllTasks(w http.ResponseWriter, _ *http.Request) {
+func (a *API) listAllTasks(w http.ResponseWriter, r *http.Request) {
 	items := a.tasks.List("")
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	visible := items[:0]
+	for _, item := range items {
+		if _, err := a.store.Get(r.Context(), item.ProjectID); err == nil {
+			visible = append(visible, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": visible, "total": len(visible)})
 }
 
 func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
@@ -1668,10 +1681,24 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
-	if err := a.store.Delete(r.Context(), r.PathValue("id")); err != nil {
+	projectID := r.PathValue("id")
+	files, err := a.knowledge.ListFileAssets(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if err := a.store.Delete(r.Context(), projectID); err != nil {
 		a.handleStoreError(w, err)
 		return
 	}
+	for _, item := range files {
+		if item.SourceID != "" {
+			_ = a.knowledge.DeleteSource(r.Context(), item.SourceID)
+		}
+		_, _ = a.knowledge.DeleteFileAsset(r.Context(), item.ID)
+		_ = os.Remove(filepath.Join(knowledgeUploadRoot(), item.StoragePath))
+	}
+	_ = os.Remove(filepath.Join(knowledgeUploadRoot(), projectID))
 	w.WriteHeader(http.StatusNoContent)
 }
 

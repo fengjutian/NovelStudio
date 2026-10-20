@@ -17,14 +17,18 @@ type KnowledgeStore struct{ DB *sql.DB }
 func (s KnowledgeStore) ProjectIDForFact(ctx context.Context, id string) (string, error) {
 	var projectID string
 	err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM knowledge_facts WHERE id=?`, id).Scan(&projectID)
-	if errors.Is(err, sql.ErrNoRows) { return "", knowledge.ErrNotFound }
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", knowledge.ErrNotFound
+	}
 	return projectID, err
 }
 
 func (s KnowledgeStore) ProjectIDForMemory(ctx context.Context, id string) (string, error) {
 	var projectID string
 	err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM story_memories WHERE id=?`, id).Scan(&projectID)
-	if errors.Is(err, sql.ErrNoRows) { return "", knowledge.ErrNotFound }
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", knowledge.ErrNotFound
+	}
 	return projectID, err
 }
 
