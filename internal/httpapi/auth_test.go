@@ -88,6 +88,17 @@ func TestProjectsAreIsolatedByUser(t *testing.T) {
 	if err := json.NewDecoder(created.Body).Decode(&item); err != nil {
 		t.Fatal(err)
 	}
+	documentCreated := httptest.NewRecorder()
+	h.ServeHTTP(documentCreated, authenticatedRequest(http.MethodPost, "/api/v1/projects/"+item.ID+"/documents", bytes.NewBufferString(`{"title":"Private chapter","content":"secret"}`), first))
+	if documentCreated.Code != http.StatusCreated {
+		t.Fatalf("create document: %d %s", documentCreated.Code, documentCreated.Body.String())
+	}
+	var documentResult struct {
+		Document document.Document `json:"document"`
+	}
+	if err := json.NewDecoder(documentCreated.Body).Decode(&documentResult); err != nil {
+		t.Fatal(err)
+	}
 
 	list := httptest.NewRecorder()
 	h.ServeHTTP(list, authenticatedRequest(http.MethodGet, "/api/v1/projects", nil, second))
@@ -98,5 +109,10 @@ func TestProjectsAreIsolatedByUser(t *testing.T) {
 	h.ServeHTTP(get, authenticatedRequest(http.MethodGet, "/api/v1/projects/"+item.ID, nil, second))
 	if get.Code != http.StatusNotFound {
 		t.Fatalf("second user can read first user's project: %d %s", get.Code, get.Body.String())
+	}
+	documentGet := httptest.NewRecorder()
+	h.ServeHTTP(documentGet, authenticatedRequest(http.MethodGet, "/api/v1/documents/"+documentResult.Document.ID, nil, second))
+	if documentGet.Code != http.StatusNotFound {
+		t.Fatalf("second user can read first user's document: %d %s", documentGet.Code, documentGet.Body.String())
 	}
 }

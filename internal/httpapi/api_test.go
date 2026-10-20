@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -210,6 +212,39 @@ func TestDocumentAndKnowledgeLifecycle(t *testing.T) {
 	handler.ServeHTTP(search, httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID+"/knowledge/search?q=沈砚", nil))
 	if search.Code != http.StatusOK || !bytes.Contains(search.Body.Bytes(), []byte("县衙书吏")) {
 		t.Fatalf("search status=%d body=%s", search.Code, search.Body.String())
+	}
+}
+
+func TestDeleteProjectRemovesKnowledgeFiles(t *testing.T) {
+	projects := project.NewMemoryStore()
+	knowledgeStore := knowledge.NewMemoryStore()
+	handler := httpapi.NewWithStores(projects, document.NewMemoryStore(), knowledgeStore, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	items, _ := projects.List(context.Background())
+	projectID := items[0].ID
+	root := t.TempDir()
+	t.Setenv("KNOWLEDGE_UPLOAD_DIR", root)
+	relative := filepath.Join(projectID, "sample.txt")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, relative)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, relative), []byte("sample"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := knowledgeStore.CreateFileAsset(context.Background(), knowledge.CreateFileAssetInput{ProjectID: projectID, Name: "sample.txt", Extension: ".txt", StoragePath: relative}); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/projects/"+projectID, nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, relative)); !os.IsNotExist(err) {
+		t.Fatalf("uploaded file still exists: %v", err)
+	}
+	files, err := knowledgeStore.ListFileAssets(context.Background(), projectID)
+	if err != nil || len(files) != 0 {
+		t.Fatalf("knowledge files remain: %#v, %v", files, err)
 	}
 }
 
