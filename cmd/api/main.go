@@ -34,9 +34,16 @@ func main() {
 	applyLocalModelConfig()
 	projectStore, documentStore, knowledgeStore, runRecorder, qualityStore, authStore, canonStore, taskManager, closeStore := stores()
 	defer closeStore()
-	if err := seedDefaultUser(authStore); err != nil {
+	defaultUser, err := seedDefaultUser(authStore)
+	if err != nil {
 		slog.Error("cannot create default user", "error", err)
 		os.Exit(1)
+	}
+	if defaultUser.ID != "" {
+		if err := projectStore.ClaimUnowned(context.Background(), defaultUser.ID); err != nil {
+			slog.Error("cannot assign legacy projects", "error", err)
+			os.Exit(1)
+		}
 	}
 	taskManager.ConfigureQueue(positiveEnvInt("AI_WORKER_COUNT", 3), positiveEnvInt("AI_QUEUE_SIZE", 100))
 	if timeout, err := time.ParseDuration(env("AI_TASK_TIMEOUT", "60m")); err == nil && timeout > 0 {
@@ -232,32 +239,32 @@ func stores() (project.Store, document.Store, knowledge.Store, airun.Recorder, q
 	return mysqlstore.ProjectStore{DB: db}, mysqlstore.DocumentStore{DB: db}, mysqlstore.KnowledgeStore{DB: db}, mysqlstore.AIRunRecorder{DB: db}, mysqlstore.QualityStore{DB: db}, mysqlstore.AuthStore{DB: db}, mysqlstore.CanonStore{DB: db}, task.NewManagerWithRepository(mysqlstore.TaskRepository{DB: db}), func() { _ = db.Close() }
 }
 
-func seedDefaultUser(store auth.Store) error {
+func seedDefaultUser(store auth.Store) (auth.User, error) {
 	email := auth.NormalizeEmail(env("DEFAULT_USER_EMAIL", "admin@novelstudio.local"))
 	password := env("DEFAULT_USER_PASSWORD", "admin12345")
 	name := strings.TrimSpace(env("DEFAULT_USER_NAME", "Administrator"))
 	if email == "" || password == "" {
 		slog.Info("default user disabled")
-		return nil
+		return auth.User{}, nil
 	}
 	if len(password) < 8 || len(password) > 128 {
-		return fmt.Errorf("DEFAULT_USER_PASSWORD must be 8 to 128 characters")
+		return auth.User{}, fmt.Errorf("DEFAULT_USER_PASSWORD must be 8 to 128 characters")
 	}
-	if _, _, err := store.UserByEmail(context.Background(), email); err == nil {
-		return nil
+	if user, _, err := store.UserByEmail(context.Background(), email); err == nil {
+		return user, nil
 	} else if err != auth.ErrNotFound {
-		return fmt.Errorf("look up default user: %w", err)
+		return auth.User{}, fmt.Errorf("look up default user: %w", err)
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		return fmt.Errorf("hash default user password: %w", err)
+		return auth.User{}, fmt.Errorf("hash default user password: %w", err)
 	}
 	user := auth.User{ID: auth.NewID("usr_"), Name: name, Email: email, CreatedAt: time.Now().UTC()}
 	if err := store.CreateUser(context.Background(), user, hash); err != nil && err != auth.ErrEmailTaken {
-		return fmt.Errorf("create default user: %w", err)
+		return auth.User{}, fmt.Errorf("create default user: %w", err)
 	}
 	slog.Info("default user ready", "email", email)
-	return nil
+	return user, nil
 }
 
 func validationPipeline(recorder airun.Recorder) *validation.Pipeline {

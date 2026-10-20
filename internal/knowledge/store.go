@@ -23,14 +23,32 @@ type Store interface {
 	CreateFacts(context.Context, string, []CreateFactInput) ([]Fact, error)
 	ListFacts(context.Context, string) ([]Fact, error)
 	UpdateFactStatus(context.Context, string, string) (Fact, error)
+	ProjectIDForFact(context.Context, string) (string, error)
 	CreateMemory(context.Context, string, CreateMemoryInput) (MemoryEntry, error)
 	UpdateMemory(context.Context, string, CreateMemoryInput) (MemoryEntry, error)
 	ListMemories(context.Context, string, string) ([]MemoryEntry, error)
 	DeleteMemory(context.Context, string) error
+	ProjectIDForMemory(context.Context, string) (string, error)
 	CreateFileAsset(context.Context, CreateFileAssetInput) (FileAsset, error)
 	ListFileAssets(context.Context, string) ([]FileAsset, error)
 	GetFileAsset(context.Context, string) (FileAsset, error)
 	DeleteFileAsset(context.Context, string) (FileAsset, error)
+}
+
+func (s *MemoryStore) ProjectIDForFact(_ context.Context, id string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.facts[id]
+	if !ok { return "", ErrNotFound }
+	return item.ProjectID, nil
+}
+
+func (s *MemoryStore) ProjectIDForMemory(_ context.Context, id string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.memories[id]
+	if !ok { return "", ErrNotFound }
+	return item.ProjectID, nil
 }
 
 type MemoryStore struct {

@@ -124,6 +124,7 @@ func (a *API) requireAuth(next http.Handler) http.Handler {
 			writeError(w, 401, "UNAUTHENTICATED", "please sign in")
 			return
 		}
-		next.ServeHTTP(w, r)
+		user, _ := a.currentUser(r)
+		next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), user)))
 	})
 }

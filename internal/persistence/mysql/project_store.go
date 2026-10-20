@@ -8,12 +8,27 @@ import (
 	"strings"
 	"time"
 
+	"novelstudio/internal/auth"
 	"novelstudio/internal/project"
 )
 
 type ProjectStore struct{ DB *sql.DB }
 
 var _ project.Store = ProjectStore{}
+
+func (s ProjectStore) ProjectIDForNode(ctx context.Context, id string) (string, error) {
+	var projectID string
+	err := s.DB.QueryRowContext(ctx, `SELECT project_id FROM content_nodes WHERE id=?`, id).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", project.ErrNotFound
+	}
+	return projectID, err
+}
+
+func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE projects SET owner_id=? WHERE owner_id IS NULL OR owner_id=''`, ownerID)
+	return err
+}
 
 func (s ProjectStore) ClaimUnowned(ctx context.Context, ownerID string) error {
 	ownerID = strings.TrimSpace(ownerID)
@@ -101,7 +116,15 @@ func (s ProjectStore) DeleteNode(ctx context.Context, id string) error {
 }
 
 func (s ProjectStore) List(ctx context.Context) ([]project.Project, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, project_type, description, status, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY updated_at DESC`)
+	user, scoped := auth.UserFromContext(ctx)
+	query := `SELECT id, owner_id, name, project_type, description, status, created_at, updated_at FROM projects WHERE deleted_at IS NULL`
+	var args []any
+	if scoped {
+		query += ` AND owner_id=?`
+		args = append(args, user.ID)
+	}
+	query += ` ORDER BY updated_at DESC`
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +132,7 @@ func (s ProjectStore) List(ctx context.Context) ([]project.Project, error) {
 	items := make([]project.Project, 0)
 	for rows.Next() {
 		var item project.Project
-		if err := rows.Scan(&item.ID, &item.Name, &item.Type, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OwnerID, &item.Name, &item.Type, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -119,7 +142,14 @@ func (s ProjectStore) List(ctx context.Context) ([]project.Project, error) {
 
 func (s ProjectStore) Get(ctx context.Context, id string) (project.Project, error) {
 	var item project.Project
-	err := s.DB.QueryRowContext(ctx, `SELECT id, name, project_type, description, status, created_at, updated_at FROM projects WHERE id = ? AND deleted_at IS NULL`, id).Scan(&item.ID, &item.Name, &item.Type, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	user, scoped := auth.UserFromContext(ctx)
+	query := `SELECT id, owner_id, name, project_type, description, status, created_at, updated_at FROM projects WHERE id = ? AND deleted_at IS NULL`
+	args := []any{id}
+	if scoped {
+		query += ` AND owner_id=?`
+		args = append(args, user.ID)
+	}
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&item.ID, &item.OwnerID, &item.Name, &item.Type, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return project.Project{}, project.ErrNotFound
 	}
@@ -145,7 +175,10 @@ func (s ProjectStore) Create(ctx context.Context, input project.CreateInput) (pr
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	item := project.Project{ID: newID("prj"), Name: input.Name, Type: input.Type, Description: strings.TrimSpace(input.Description), Status: "DRAFT", CreatedAt: now, UpdatedAt: now}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO projects(id,name,project_type,description,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, item.ID, item.Name, item.Type, item.Description, item.Status, now, now); err != nil {
+	if user, ok := auth.UserFromContext(ctx); ok {
+		item.OwnerID = user.ID
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO projects(id,owner_id,name,project_type,description,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.OwnerID, item.Name, item.Type, item.Description, item.Status, now, now); err != nil {
 		return project.Project{}, err
 	}
 	rootType, childType := "SECTION", "CHAPTER"
