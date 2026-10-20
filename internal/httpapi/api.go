@@ -1415,7 +1415,7 @@ func (a *API) contentTypePrompt(ctx context.Context, code project.Type) string {
 				parts = append(parts, "内容类型生成规范：\n"+item.Prompt)
 			}
 			if strings.TrimSpace(item.Roles) != "" {
-				parts = append(parts, "人物与任务角色设定：\n"+item.Roles+"\n生成内容时必须保持角色身份、目标、关系、能力边界、语言特征和人物弧光一致；资料未提供的角色事实不得擅自补全。")
+				parts = append(parts, "创作人格与人物角色设定：\n"+item.Roles+"\n生成内容时必须始终遵守创作人格的专业能力、表达风格和禁忌，并保持内容人物的身份、目标、关系、能力边界、语言特征和人物弧光一致；资料未提供的角色事实不得擅自补全。")
 			}
 			return strings.Join(parts, "\n\n")
 		}
