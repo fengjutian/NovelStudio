@@ -324,14 +324,16 @@ main{grid-column:2;width:auto;max-width:1440px;padding:56px clamp(34px,5vw,78px)
 .document-workbench{position:relative;transition:grid-template-columns .18s ease}
 .document-workbench.browser-collapsed{grid-template-columns:32px minmax(0,1fr)}
 .document-workbench.browser-collapsed .document-browser{border-right:0;visibility:hidden}
-.document-browser-toggle{top:10px;left:287px}
+.document-browser-toggle{top:10px;left:4px}
 .document-workbench.browser-collapsed .document-browser-toggle{top:10px;left:4px;width:24px;height:28px;transform:none;border:1px solid #d9d1c6;border-radius:7px}
+.document-browser-collapse{display:grid!important;place-items:center;width:24px;height:26px;padding:0!important;border:1px solid #d9d1c6!important;border-radius:6px!important;background:#fffdf9!important;color:#8b5a24!important}
+.document-browser-collapse svg{width:13px;height:13px}
 .editor-layout{position:relative;transition:grid-template-columns .18s ease}
 .editor-layout.versions-collapsed{grid-template-columns:minmax(0,1fr) 32px}
 .editor-layout.versions-collapsed .version-panel{padding-left:0;padding-right:0;border-left:0;visibility:hidden;overflow:hidden}
 .version-panel-toggle{top:8px;right:217px}
 .editor-layout.versions-collapsed .version-panel-toggle{top:8px;right:4px;width:24px;height:28px;transform:none;border:1px solid #d9d1c6;border-radius:7px}
-@media(max-width:1100px){.workspace-nav-toggle{left:193px}.document-browser-toggle{left:227px}.version-panel-toggle{right:8px}}
+@media(max-width:1100px){.workspace-nav-toggle{left:193px}.version-panel-toggle{right:8px}}
 @media(max-width:760px){.workspace-nav-toggle{display:none}.document-browser-toggle{left:auto;right:8px}.document-workbench.browser-collapsed{grid-template-columns:1fr}.document-workbench.browser-collapsed .document-browser{display:none}.version-panel-toggle{right:8px}}
 
 /* Viewport scrolling: navigation chrome stays fixed; only the right content pane scrolls. */
