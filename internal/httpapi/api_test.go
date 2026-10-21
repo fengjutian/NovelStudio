@@ -296,6 +296,59 @@ func (generationProvider) Generate(context.Context, llm.GenerateRequest) (llm.Ge
 }
 func (generationProvider) HealthCheck(context.Context) error { return nil }
 
+type chapterExtractionProvider struct{}
+
+func (chapterExtractionProvider) Generate(_ context.Context, request llm.GenerateRequest) (llm.GenerateResponse, error) {
+	if strings.Contains(request.Messages[0].Content, "结构化事实抽取") {
+		return llm.GenerateResponse{Content: `{"facts":[{"subject":"林川","predicate":"health","object":"injured","confidence":0.98}]}`}, nil
+	}
+	return llm.GenerateResponse{Content: "林川在冲突中左腿受伤。"}, nil
+}
+func (chapterExtractionProvider) HealthCheck(context.Context) error { return nil }
+
+func TestNovelGenerationCreatesReviewableFactCandidates(t *testing.T) {
+	projects := project.NewMemoryStore()
+	documents := document.NewMemoryStore()
+	knowledgeStore := knowledge.NewMemoryStore()
+	generator := &generation.Service{ProviderName: "test", Provider: chapterExtractionProvider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer", generation.OperationExtract: "extractor"}}
+	handler := httpapi.NewWithServices(projects, documents, knowledgeStore, nil, generator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	novel, err := projects.Create(context.Background(), project.CreateInput{Name: "Candidate novel", Type: project.TypeNovel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+novel.ID+"/generation-tasks", bytes.NewBufferString(`{"operation":"WRITE","instruction":"write chapter","title":"chapter one"}`)))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created task.Task
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		current := httptest.NewRecorder()
+		handler.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+created.ID, nil))
+		var item task.Task
+		_ = json.NewDecoder(current.Body).Decode(&item)
+		if item.Status == task.StatusFailed {
+			t.Fatalf("generation failed: %s", item.Error)
+		}
+		if item.Status == task.StatusSuccess {
+			facts, listErr := knowledgeStore.ListFacts(context.Background(), novel.ID)
+			if listErr != nil || len(facts) != 1 {
+				t.Fatalf("facts=%#v err=%v", facts, listErr)
+			}
+			if facts[0].Status != "PROPOSED" || facts[0].SourceChunkID == "" {
+				t.Fatalf("candidate is not reviewable or lacks chapter evidence: %#v", facts[0])
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("generation task did not complete")
+}
+
 type resumableGenerationProvider struct {
 	mu       sync.Mutex
 	calls    int

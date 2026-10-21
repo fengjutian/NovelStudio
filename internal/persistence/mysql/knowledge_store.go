@@ -167,7 +167,7 @@ func (s KnowledgeStore) CreateFacts(ctx context.Context, projectID string, input
 			continue
 		}
 		item := knowledge.Fact{ID: newID("fac"), ProjectID: projectID, Subject: input.Subject, Predicate: input.Predicate, Object: input.Object, SourceChunkID: input.SourceChunkID, Confidence: input.Confidence, Status: "PROPOSED", CreatedAt: now, UpdatedAt: now}
-		_, err = tx.ExecContext(ctx, `INSERT INTO knowledge_facts(id,project_id,subject,predicate,object,source_version_id,confidence,status,created_at,updated_at) VALUES(?,?,?,?,?,NULL,?,'PROPOSED',?,?)`, item.ID, projectID, item.Subject, item.Predicate, item.Object, item.Confidence, now, now)
+		_, err = tx.ExecContext(ctx, `INSERT INTO knowledge_facts(id,project_id,subject,predicate,object,source_version_id,confidence,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'PROPOSED',?,?)`, item.ID, projectID, item.Subject, item.Predicate, item.Object, nullable(item.SourceChunkID), item.Confidence, now, now)
 		if err != nil {
 			return nil, err
 		}

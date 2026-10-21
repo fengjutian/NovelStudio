@@ -417,6 +417,8 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		}
 		outputs := make([]generation.Result, 0, len(nodes))
 		documents := make([]document.Document, 0, len(nodes))
+		proposedFacts := make([]knowledge.Fact, 0)
+		extractionWarnings := make([]string, 0)
 		semaphore := make(chan struct{}, input.WindowSize)
 		errorsChannel := make(chan error, len(nodes))
 		var wait sync.WaitGroup
@@ -533,9 +535,14 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 					errorsChannel <- dependencyErr
 					return
 				}
+				facts, extractionErr := a.extractGeneratedFacts(ctx, projectItem, chapterVersionID, result.Content)
 				resultMu.Lock()
 				outputs = append(outputs, result)
 				documents = append(documents, doc)
+				proposedFacts = append(proposedFacts, facts...)
+				if extractionErr != nil {
+					extractionWarnings = append(extractionWarnings, node.Title+": "+extractionErr.Error())
+				}
 				resultMu.Unlock()
 				done := completed.Add(1)
 				progress(5+int(done)*90/len(nodes), "已保存 "+node.Title)
@@ -548,7 +555,7 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 				return nil, batchErr
 			}
 		}
-		return map[string]any{"documents": documents, "generations": outputs, "completed": completed.Load(), "total": len(nodes)}, nil
+		return map[string]any{"documents": documents, "generations": outputs, "proposedFacts": proposedFacts, "extractionWarnings": extractionWarnings, "completed": completed.Load(), "total": len(nodes)}, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
 }
@@ -1001,6 +1008,32 @@ func (a *API) createFactExtractionTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, item)
 }
 
+func (a *API) extractGeneratedFacts(ctx context.Context, projectItem project.Project, versionID, content string) ([]knowledge.Fact, error) {
+	if projectItem.Type != project.TypeNovel || a.generator == nil || !a.generator.Configured(generation.OperationExtract) {
+		return nil, nil
+	}
+	generated, err := a.generator.Generate(ctx, generation.Request{
+		Operation: generation.OperationExtract, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type),
+		ProjectID: projectItem.ID, Instruction: "抽取本章正文中明确发生的新事实，作为待人工审核的 Canon 候选；不要把计划、推测或未发生的大纲内容当成事实", Content: content,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var decoded struct {
+		Facts []knowledge.CreateFactInput `json:"facts"`
+	}
+	raw := strings.TrimSpace(generated.Content)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimSuffix(raw, "```")
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil {
+		return nil, fmt.Errorf("decode generated chapter facts: %w", err)
+	}
+	for index := range decoded.Facts {
+		decoded.Facts[index].SourceChunkID = versionID
+	}
+	return a.knowledge.CreateFacts(ctx, projectItem.ID, decoded.Facts)
+}
+
 func chapterGenerationInstruction(projectItem project.Project, node project.ContentNode, instruction string) string {
 	parts := []string{strings.TrimSpace(instruction), "作品名称：" + projectItem.Name}
 	if description := strings.TrimSpace(projectItem.Description); description != "" {
@@ -1093,8 +1126,13 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		if dependencyErr := a.registerManifestDependencies(ctx, result.Generation.ContextManifest, version.ID); dependencyErr != nil {
 			return nil, dependencyErr
 		}
+		facts, extractionErr := a.extractGeneratedFacts(ctx, projectItem, version.ID, result.Content)
 		a.saveQuality(ctx, projectItem.ID, doc.ID, version.ID, result.Content, result.Validation)
-		return map[string]any{"workflow": result, "document": doc, "version": version}, nil
+		response := map[string]any{"workflow": result, "document": doc, "version": version, "proposedFacts": facts}
+		if extractionErr != nil {
+			response["extractionWarning"] = extractionErr.Error()
+		}
+		return response, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
 }
@@ -1317,7 +1355,15 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 					return nil, dependencyErr
 				}
 			}
-			return map[string]any{"generation": generated, "document": doc, "version": version}, nil
+			response := map[string]any{"generation": generated, "document": doc, "version": version}
+			if input.Operation == generation.OperationWrite {
+				facts, extractionErr := a.extractGeneratedFacts(ctx, projectItem, version.ID, generated.Content)
+				response["proposedFacts"] = facts
+				if extractionErr != nil {
+					response["extractionWarning"] = extractionErr.Error()
+				}
+			}
+			return response, nil
 		}
 		version, versionErr := a.docs.CreateVersion(ctx, input.DocumentID, document.CreateVersionInput{Content: generated.Content, Reason: "AI_" + string(input.Operation), AuthorType: "AI", ExpectedVersionID: expectedVersionID})
 		if versionErr != nil {
@@ -1328,7 +1374,15 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 				return nil, dependencyErr
 			}
 		}
-		return map[string]any{"generation": generated, "documentId": input.DocumentID, "version": version}, nil
+		response := map[string]any{"generation": generated, "documentId": input.DocumentID, "version": version}
+		if input.Operation == generation.OperationWrite {
+			facts, extractionErr := a.extractGeneratedFacts(ctx, projectItem, version.ID, generated.Content)
+			response["proposedFacts"] = facts
+			if extractionErr != nil {
+				response["extractionWarning"] = extractionErr.Error()
+			}
+		}
+		return response, nil
 	})
 	writeJSON(w, http.StatusAccepted, item)
 }
