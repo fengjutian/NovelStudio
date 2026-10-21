@@ -10,6 +10,9 @@ type ContextManifest struct {
 	ChapterNodeID            string              `json:"chapterNodeId,omitempty"`
 	PreviousChapterVersionID string              `json:"previousChapterVersionId,omitempty"`
 	EvidenceIDs              []string            `json:"evidenceIds"`
+	EntityIDs                []string            `json:"entityIds,omitempty"`
+	FactIDs                  []string            `json:"factIds,omitempty"`
+	EventIDs                 []string            `json:"eventIds,omitempty"`
 	PromptVersion            string              `json:"promptVersion,omitempty"`
 	Model                    string              `json:"model,omitempty"`
 	Truncations              []ContextTruncation `json:"truncations"`

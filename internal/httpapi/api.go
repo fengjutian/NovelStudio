@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -372,7 +373,12 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		}
 		nodes = append(nodes, node)
 	}
-	evidence := a.memoryEvidence(r.Context(), projectItem.ID)
+	baseManifest, canonEvidence, err := a.contextManifest(r.Context(), projectItem.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	evidence := append(a.memoryEvidence(r.Context(), projectItem.ID), canonEvidence...)
 	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
 	ungroundedCommentary := false
 	if projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary {
@@ -474,12 +480,8 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						chapterInstruction += "\n\n上一章《" + previousNode.Title + "》结尾（必须承接其事实、人物状态和时间线，不得改写上一章）：\n<previous-chapter>\n" + tailRunes(previousVersions[0].Content, 4000) + "\n</previous-chapter>"
 					}
 				}
-				canonVersion, versionErr := a.canon.Version(ctx, projectItem.ID, "main")
-				if versionErr != nil {
-					errorsChannel <- versionErr
-					return
-				}
-				manifest := generation.ContextManifest{ProjectID: projectItem.ID, BranchID: "main", CanonVersion: canonVersion, ChapterNodeID: node.ID}
+				manifest := baseManifest
+				manifest.ChapterNodeID = node.ID
 				if previousNode.DocumentID != nil && *previousNode.DocumentID != "" {
 					if previousVersions, versionsErr := a.docs.Versions(ctx, *previousNode.DocumentID); versionsErr == nil && len(previousVersions) > 0 {
 						manifest.PreviousChapterVersionID = previousVersions[0].ID
@@ -490,30 +492,42 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 					errorsChannel <- generateErr
 					return
 				}
+				if versionErr := a.requireCanonVersion(ctx, projectItem.ID, manifest.BranchID, manifest.CanonVersion); versionErr != nil {
+					errorsChannel <- versionErr
+					return
+				}
 				var doc document.Document
+				var chapterVersionID string
 				if node.DocumentID != nil && *node.DocumentID != "" {
 					current, getErr := a.docs.Get(ctx, *node.DocumentID)
 					if getErr != nil {
 						errorsChannel <- getErr
 						return
 					}
-					if _, saveErr := a.docs.CreateVersion(ctx, current.ID, document.CreateVersionInput{Content: result.Content, Reason: "AI_WRITE", AuthorType: "AI", ExpectedVersionID: current.CurrentVersionID}); saveErr != nil {
+					version, saveErr := a.docs.CreateVersion(ctx, current.ID, document.CreateVersionInput{Content: result.Content, Reason: "AI_WRITE", AuthorType: "AI", ExpectedVersionID: current.CurrentVersionID})
+					if saveErr != nil {
 						errorsChannel <- saveErr
 						return
 					}
+					chapterVersionID = version.ID
 					doc, _ = a.docs.Get(ctx, current.ID)
 				} else {
-					created, _, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: node.Title, Content: result.Content})
+					created, version, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: node.Title, Content: result.Content})
 					if createErr != nil {
 						errorsChannel <- createErr
 						return
 					}
 					doc = created
+					chapterVersionID = version.ID
 					documentID := created.ID
 					if _, updateErr := a.store.UpdateNode(ctx, node.ID, project.UpdateNodeInput{Title: node.Title, Position: node.Position, Metadata: node.Metadata, DocumentID: &documentID}); updateErr != nil {
 						errorsChannel <- updateErr
 						return
 					}
+				}
+				if dependencyErr := a.registerManifestDependencies(ctx, manifest, chapterVersionID); dependencyErr != nil {
+					errorsChannel <- dependencyErr
+					return
 				}
 				resultMu.Lock()
 				outputs = append(outputs, result)
@@ -745,12 +759,52 @@ func validationEvidence(items []generation.Evidence) []validation.Evidence {
 	return result
 }
 
-func (a *API) contextManifest(ctx context.Context, projectID string) (generation.ContextManifest, error) {
+func (a *API) contextManifest(ctx context.Context, projectID string) (generation.ContextManifest, []generation.Evidence, error) {
 	version, err := a.canon.Version(ctx, projectID, "main")
 	if err != nil {
-		return generation.ContextManifest{}, err
+		return generation.ContextManifest{}, nil, err
 	}
-	return generation.ContextManifest{ProjectID: projectID, BranchID: "main", CanonVersion: version}, nil
+	state, err := a.canon.State(ctx, projectID, "main")
+	if err != nil {
+		return generation.ContextManifest{}, nil, err
+	}
+	entityIDs := make([]string, 0, len(state))
+	for id := range state {
+		entityIDs = append(entityIDs, id)
+	}
+	sort.Strings(entityIDs)
+	manifest := generation.ContextManifest{ProjectID: projectID, BranchID: "main", CanonVersion: version, EntityIDs: entityIDs}
+	if len(state) == 0 {
+		return manifest, nil, nil
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return generation.ContextManifest{}, nil, err
+	}
+	evidence := []generation.Evidence{{ID: fmt.Sprintf("canon:%s:main:%d", projectID, version), Source: "Canon / main / current state", Authority: "CANON", Content: string(raw)}}
+	return manifest, evidence, nil
+}
+
+func (a *API) requireCanonVersion(ctx context.Context, projectID, branchID string, expected int64) error {
+	current, err := a.canon.Version(ctx, projectID, branchID)
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return fmt.Errorf("%w: generation used canon version %d, current version is %d", canon.ErrConflict, expected, current)
+	}
+	return nil
+}
+
+func (a *API) registerManifestDependencies(ctx context.Context, manifest generation.ContextManifest, chapterVersionID string) error {
+	dependencies := canon.ChapterDependencies{
+		ProjectID: manifest.ProjectID, BranchID: manifest.BranchID, ChapterVersionID: chapterVersionID,
+		CanonVersion: manifest.CanonVersion, FactIDs: manifest.FactIDs, EntityIDs: manifest.EntityIDs, EventIDs: manifest.EventIDs,
+	}
+	if manifest.PreviousChapterVersionID != "" {
+		dependencies.DependsOnChapterVersionIDs = []string{manifest.PreviousChapterVersionID}
+	}
+	return a.canon.RegisterDependencies(ctx, dependencies)
 }
 func (a *API) createMemoryExtractionTask(w http.ResponseWriter, r *http.Request) {
 	if a.generator == nil || !a.generator.Configured(generation.OperationMemory) {
@@ -990,13 +1044,14 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "instruction is required")
 		return
 	}
-	manifest, err := a.contextManifest(r.Context(), projectItem.ID)
+	manifest, canonEvidence, err := a.contextManifest(r.Context(), projectItem.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Manifest: manifest}
 	genRequest.Evidence = append(genRequest.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
+	genRequest.Evidence = append(genRequest.Evidence, canonEvidence...)
 	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}, Evidence: validationEvidence(genRequest.Evidence)}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
@@ -1020,10 +1075,16 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		if runErr != nil {
 			return nil, runErr
 		}
+		if versionErr := a.requireCanonVersion(ctx, projectItem.ID, manifest.BranchID, manifest.CanonVersion); versionErr != nil {
+			return nil, versionErr
+		}
 		progress(90, "保存质量门禁结果")
 		doc, version, saveErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: title, Content: result.Content})
 		if saveErr != nil {
 			return nil, saveErr
+		}
+		if dependencyErr := a.registerManifestDependencies(ctx, result.Generation.ContextManifest, version.ID); dependencyErr != nil {
+			return nil, dependencyErr
 		}
 		a.saveQuality(ctx, projectItem.ID, doc.ID, version.ID, result.Content, result.Validation)
 		return map[string]any{"workflow": result, "document": doc, "version": version}, nil
@@ -1166,13 +1227,14 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "model is not configured for "+string(input.Operation))
 		return
 	}
-	manifest, err := a.contextManifest(r.Context(), projectItem.ID)
+	manifest, canonEvidence, err := a.contextManifest(r.Context(), projectItem.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content, Manifest: manifest}
 	request.Evidence = append(request.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
+	request.Evidence = append(request.Evidence, canonEvidence...)
 	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
 	if input.Operation == generation.OperationWrite && (projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary) {
 		sources, sourcesErr := a.knowledge.ListSources(r.Context(), projectItem.ID)
@@ -1228,16 +1290,31 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		if input.Save != nil && !*input.Save {
 			return map[string]any{"generation": generated}, nil
 		}
+		if input.Operation == generation.OperationWrite {
+			if versionErr := a.requireCanonVersion(ctx, projectItem.ID, generated.ContextManifest.BranchID, generated.ContextManifest.CanonVersion); versionErr != nil {
+				return nil, versionErr
+			}
+		}
 		if input.DocumentID == "" {
 			doc, version, createErr := a.docs.Create(ctx, document.CreateInput{ProjectID: projectItem.ID, Title: title, Content: generated.Content})
 			if createErr != nil {
 				return nil, createErr
+			}
+			if input.Operation == generation.OperationWrite {
+				if dependencyErr := a.registerManifestDependencies(ctx, generated.ContextManifest, version.ID); dependencyErr != nil {
+					return nil, dependencyErr
+				}
 			}
 			return map[string]any{"generation": generated, "document": doc, "version": version}, nil
 		}
 		version, versionErr := a.docs.CreateVersion(ctx, input.DocumentID, document.CreateVersionInput{Content: generated.Content, Reason: "AI_" + string(input.Operation), AuthorType: "AI", ExpectedVersionID: expectedVersionID})
 		if versionErr != nil {
 			return nil, versionErr
+		}
+		if input.Operation == generation.OperationWrite {
+			if dependencyErr := a.registerManifestDependencies(ctx, generated.ContextManifest, version.ID); dependencyErr != nil {
+				return nil, dependencyErr
+			}
 		}
 		return map[string]any{"generation": generated, "documentId": input.DocumentID, "version": version}, nil
 	})
