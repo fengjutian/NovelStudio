@@ -359,6 +359,12 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectID := novel.ID
+	canonResponse := httptest.NewRecorder()
+	canonBody := `{"baseCanonVersion":0,"chapterVersionId":"seed-version","approvedBy":"author","entities":[{"id":"char_1","type":"CHARACTER","name":"林川"}],"transitions":[{"id":"state_1","entityId":"char_1","field":"health","before":null,"after":"injured","storyTime":"day-1","source":{"documentVersionId":"seed-version","startOffset":0,"endOffset":2}}]}`
+	handler.ServeHTTP(canonResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/canon/commits", bytes.NewBufferString(canonBody)))
+	if canonResponse.Code != http.StatusCreated {
+		t.Fatalf("canon commit status=%d body=%s", canonResponse.Code, canonResponse.Body.String())
+	}
 	nodes := make([]project.ContentNode, 0, 2)
 	for index, title := range []string{"chapter one", "chapter two"} {
 		node, err := projects.CreateNode(context.Background(), projectID, project.CreateNodeInput{NodeType: "CHAPTER", Title: title, Position: index + 1})
@@ -423,8 +429,18 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	if provider.calls != 3 {
 		t.Fatalf("provider calls = %d, want 3", provider.calls)
 	}
+	if !strings.Contains(provider.requests[0].Messages[1].Content, `"health":"injured"`) || !strings.Contains(provider.requests[0].Messages[1].Content, "权威=CANON") {
+		t.Fatal("writer did not receive the current Canon state")
+	}
 	if !strings.Contains(provider.requests[2].Messages[1].Content, "generated body 1") || !strings.Contains(provider.requests[2].Messages[1].Content, "<previous-chapter>") {
 		t.Fatal("retried second chapter did not receive the completed previous chapter as continuity context")
+	}
+	versionsOne, _ = documents.Versions(context.Background(), *nodes[0].DocumentID)
+	impactBody, _ := json.Marshal(map[string]any{"triggerCanonVersion": 2, "changedChapterVersionIds": []string{versionsOne[0].ID}, "markStale": true})
+	impactResponse := httptest.NewRecorder()
+	handler.ServeHTTP(impactResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/impact-analysis", bytes.NewReader(impactBody)))
+	if impactResponse.Code != http.StatusOK || !strings.Contains(impactResponse.Body.String(), versionsTwo[0].ID) {
+		t.Fatalf("generated chapter dependency was not registered: status=%d body=%s", impactResponse.Code, impactResponse.Body.String())
 	}
 	forceBody, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "rewrite all", "windowSize": 3, "force": true})
 	forceResponse := httptest.NewRecorder()

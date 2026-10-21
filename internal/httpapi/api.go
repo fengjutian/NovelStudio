@@ -487,6 +487,10 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						manifest.PreviousChapterVersionID = previousVersions[0].ID
 					}
 				}
+				if versionErr := a.requireCanonVersion(ctx, projectItem.ID, manifest.BranchID, manifest.CanonVersion); versionErr != nil {
+					errorsChannel <- versionErr
+					return
+				}
 				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterInstruction, Evidence: evidence, Manifest: manifest})
 				if generateErr != nil {
 					errorsChannel <- generateErr
@@ -1070,6 +1074,9 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 	}
 	flow := workflow.QualityWorkflow{Generator: a.generator, Validator: a.pipeline, MaxRepairs: input.MaxRepairs}
 	item := a.tasks.Create(projectItem.ID, "QUALITY_GENERATE", func(ctx context.Context, progress func(int, string)) (any, error) {
+		if versionErr := a.requireCanonVersion(ctx, projectItem.ID, manifest.BranchID, manifest.CanonVersion); versionErr != nil {
+			return nil, versionErr
+		}
 		progress(10, "开始生成初稿")
 		result, runErr := flow.Run(ctx, genRequest, reviewRequest, progress)
 		if runErr != nil {
@@ -1280,6 +1287,11 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		title = operationTitle(input.Operation)
 	}
 	item := a.tasks.Create(projectItem.ID, string(input.Operation), func(ctx context.Context, progress func(int, string)) (any, error) {
+		if input.Operation == generation.OperationWrite {
+			if versionErr := a.requireCanonVersion(ctx, projectItem.ID, manifest.BranchID, manifest.CanonVersion); versionErr != nil {
+				return nil, versionErr
+			}
+		}
 		progress(10, "知识上下文构建完成")
 		progress(20, string(input.Operation)+" Agent 正在生成")
 		generated, generateErr := a.generator.Generate(ctx, request)
