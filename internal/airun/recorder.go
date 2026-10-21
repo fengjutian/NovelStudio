@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -28,6 +29,7 @@ type Run struct {
 	LatencyMs     int64     `json:"latencyMs"`
 	Status        string    `json:"status"`
 	Error         string    `json:"error,omitempty"`
+	ContextManifest json.RawMessage `json:"contextManifest,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 

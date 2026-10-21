@@ -343,7 +343,12 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "nodeIds and instruction are required")
 		return
 	}
-	if input.WindowSize < 1 {
+	// Novel chapters form a strict dependency chain. Generating them in
+	// parallel means later chapters cannot observe the version just saved by
+	// their predecessor, so novels always use a one-chapter window.
+	if projectItem.Type == project.TypeNovel {
+		input.WindowSize = 1
+	} else if input.WindowSize < 1 {
 		input.WindowSize = 2
 	}
 	if input.WindowSize > 3 {
@@ -469,7 +474,18 @@ func (a *API) createBatchGenerationTask(w http.ResponseWriter, r *http.Request) 
 						chapterInstruction += "\n\n上一章《" + previousNode.Title + "》结尾（必须承接其事实、人物状态和时间线，不得改写上一章）：\n<previous-chapter>\n" + tailRunes(previousVersions[0].Content, 4000) + "\n</previous-chapter>"
 					}
 				}
-				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterInstruction, Evidence: evidence})
+				canonVersion, versionErr := a.canon.Version(ctx, projectItem.ID, "main")
+				if versionErr != nil {
+					errorsChannel <- versionErr
+					return
+				}
+				manifest := generation.ContextManifest{ProjectID: projectItem.ID, BranchID: "main", CanonVersion: canonVersion, ChapterNodeID: node.ID}
+				if previousNode.DocumentID != nil && *previousNode.DocumentID != "" {
+					if previousVersions, versionsErr := a.docs.Versions(ctx, *previousNode.DocumentID); versionsErr == nil && len(previousVersions) > 0 {
+						manifest.PreviousChapterVersionID = previousVersions[0].ID
+					}
+				}
+				result, generateErr := a.generator.Generate(ctx, generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(ctx, projectItem.Type), ProjectID: projectItem.ID, Instruction: chapterInstruction, Evidence: evidence, Manifest: manifest})
 				if generateErr != nil {
 					errorsChannel <- generateErr
 					return
@@ -708,14 +724,33 @@ func (a *API) memoryEvidence(ctx context.Context, projectID string) []generation
 	if err != nil {
 		return nil
 	}
-	if len(items) > 30 {
-		items = items[:30]
-	}
-	evidence := make([]generation.Evidence, 0, len(items))
+	evidence := make([]generation.Evidence, 0, min(len(items), 30))
 	for _, item := range items {
+		if !strings.EqualFold(item.Status, "ACTIVE") {
+			continue
+		}
 		evidence = append(evidence, generation.Evidence{ID: item.ID, Source: "Story Memory / " + item.Type + " / " + item.Name, Authority: "INTERNAL", Content: item.Summary})
+		if len(evidence) == 30 {
+			break
+		}
 	}
 	return evidence
+}
+
+func validationEvidence(items []generation.Evidence) []validation.Evidence {
+	result := make([]validation.Evidence, 0, len(items))
+	for _, item := range items {
+		result = append(result, validation.Evidence{ID: item.ID, Source: item.Source, Authority: item.Authority, Content: item.Content})
+	}
+	return result
+}
+
+func (a *API) contextManifest(ctx context.Context, projectID string) (generation.ContextManifest, error) {
+	version, err := a.canon.Version(ctx, projectID, "main")
+	if err != nil {
+		return generation.ContextManifest{}, err
+	}
+	return generation.ContextManifest{ProjectID: projectID, BranchID: "main", CanonVersion: version}, nil
 }
 func (a *API) createMemoryExtractionTask(w http.ResponseWriter, r *http.Request) {
 	if a.generator == nil || !a.generator.Configured(generation.OperationMemory) {
@@ -955,9 +990,14 @@ func (a *API) createQualityGenerationTask(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "instruction is required")
 		return
 	}
-	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction}
+	manifest, err := a.contextManifest(r.Context(), projectItem.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	genRequest := generation.Request{Operation: generation.OperationWrite, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Manifest: manifest}
 	genRequest.Evidence = append(genRequest.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
-	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}}
+	reviewRequest := validation.ReviewRequest{ProjectID: projectItem.ID, Task: "校验生成内容的事实依据、一致性、完整性、术语和风格", Dimensions: []string{"groundedness", "consistency", "completeness", "terminology", "style"}, Evidence: validationEvidence(genRequest.Evidence)}
 	if strings.TrimSpace(input.KnowledgeQuery) != "" {
 		hits, searchErr := a.knowledge.Search(r.Context(), projectItem.ID, input.KnowledgeQuery, 8)
 		if searchErr != nil {
@@ -1126,7 +1166,12 @@ func (a *API) createGenerationTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "MODEL_NOT_CONFIGURED", "model is not configured for "+string(input.Operation))
 		return
 	}
-	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content}
+	manifest, err := a.contextManifest(r.Context(), projectItem.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	request := generation.Request{Operation: input.Operation, ProjectType: string(projectItem.Type), TypePrompt: a.contentTypePrompt(r.Context(), projectItem.Type), ProjectID: projectItem.ID, Instruction: input.Instruction, Content: input.Content, Manifest: manifest}
 	request.Evidence = append(request.Evidence, a.memoryEvidence(r.Context(), projectItem.ID)...)
 	knowledgeQuery := strings.TrimSpace(input.KnowledgeQuery)
 	if input.Operation == generation.OperationWrite && (projectItem.Type == project.TypeTVCommentary || projectItem.Type == project.TypeMovieCommentary) {
