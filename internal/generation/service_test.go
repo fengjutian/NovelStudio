@@ -2,14 +2,43 @@ package generation_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"novelstudio/internal/airun"
 	"novelstudio/internal/generation"
 	"novelstudio/internal/llm"
 )
+
+func TestGenerationRecordsContextManifest(t *testing.T) {
+	recorder := airun.NewMemoryRecorder()
+	service := generation.Service{ProviderName: "test", Provider: &provider{}, Models: map[generation.Operation]string{generation.OperationWrite: "writer-model"}, Recorder: recorder}
+	result, err := service.Generate(context.Background(), generation.Request{
+		Operation: generation.OperationWrite, ProjectType: "NOVEL", ProjectID: "project-1", Instruction: "write",
+		Evidence: []generation.Evidence{{ID: "memory-1", Source: "memory", Authority: "INTERNAL", Content: "林川左腿受伤"}},
+		Manifest: generation.ContextManifest{BranchID: "main", CanonVersion: 7, ChapterNodeID: "chapter-8", PreviousChapterVersionID: "version-7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ContextManifest.CanonVersion != 7 || len(result.ContextManifest.EvidenceIDs) != 1 || result.ContextManifest.EvidenceIDs[0] != "memory-1" {
+		t.Fatalf("unexpected result manifest: %#v", result.ContextManifest)
+	}
+	runs, err := recorder.List(context.Background(), "project-1", 10)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs=%#v err=%v", runs, err)
+	}
+	var stored generation.ContextManifest
+	if err := json.Unmarshal(runs[0].ContextManifest, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.ChapterNodeID != "chapter-8" || stored.Model != "writer-model" || stored.PromptVersion == "" {
+		t.Fatalf("unexpected stored manifest: %#v", stored)
+	}
+}
 
 type limitingProvider struct {
 	active    atomic.Int64

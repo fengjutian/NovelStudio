@@ -16,21 +16,21 @@ func NewID() string {
 }
 
 type Run struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"projectId,omitempty"`
-	TaskID        string    `json:"taskId,omitempty"`
-	Role          string    `json:"role"`
-	Provider      string    `json:"provider"`
-	Model         string    `json:"model"`
-	PromptVersion string    `json:"promptVersion"`
-	RequestID     string    `json:"requestId,omitempty"`
-	InputTokens   int       `json:"inputTokens"`
-	OutputTokens  int       `json:"outputTokens"`
-	LatencyMs     int64     `json:"latencyMs"`
-	Status        string    `json:"status"`
-	Error         string    `json:"error,omitempty"`
+	ID              string          `json:"id"`
+	ProjectID       string          `json:"projectId,omitempty"`
+	TaskID          string          `json:"taskId,omitempty"`
+	Role            string          `json:"role"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	PromptVersion   string          `json:"promptVersion"`
+	RequestID       string          `json:"requestId,omitempty"`
+	InputTokens     int             `json:"inputTokens"`
+	OutputTokens    int             `json:"outputTokens"`
+	LatencyMs       int64           `json:"latencyMs"`
+	Status          string          `json:"status"`
+	Error           string          `json:"error,omitempty"`
 	ContextManifest json.RawMessage `json:"contextManifest,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
+	CreatedAt       time.Time       `json:"createdAt"`
 }
 
 type Recorder interface {

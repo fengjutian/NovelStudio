@@ -4,15 +4,15 @@ package generation
 // intentionally ID-oriented so a historical run can be audited without
 // copying the complete prompt into the database.
 type ContextManifest struct {
-	ProjectID                 string              `json:"projectId,omitempty"`
-	BranchID                  string              `json:"branchId,omitempty"`
-	CanonVersion              int64               `json:"canonVersion"`
-	ChapterNodeID             string              `json:"chapterNodeId,omitempty"`
-	PreviousChapterVersionID  string              `json:"previousChapterVersionId,omitempty"`
-	EvidenceIDs               []string            `json:"evidenceIds"`
-	PromptVersion             string              `json:"promptVersion,omitempty"`
-	Model                     string              `json:"model,omitempty"`
-	Truncations               []ContextTruncation `json:"truncations"`
+	ProjectID                string              `json:"projectId,omitempty"`
+	BranchID                 string              `json:"branchId,omitempty"`
+	CanonVersion             int64               `json:"canonVersion"`
+	ChapterNodeID            string              `json:"chapterNodeId,omitempty"`
+	PreviousChapterVersionID string              `json:"previousChapterVersionId,omitempty"`
+	EvidenceIDs              []string            `json:"evidenceIds"`
+	PromptVersion            string              `json:"promptVersion,omitempty"`
+	Model                    string              `json:"model,omitempty"`
+	Truncations              []ContextTruncation `json:"truncations"`
 }
 
 type ContextTruncation struct {

@@ -354,8 +354,11 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	provider := &resumableGenerationProvider{}
 	generator := &generation.Service{ProviderName: "test", Provider: provider, Models: map[generation.Operation]string{generation.OperationWrite: "writer"}}
 	handler := httpapi.NewWithServices(projects, documents, knowledge.NewMemoryStore(), nil, generator, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	items, _ := projects.List(context.Background())
-	projectID := items[0].ID
+	novel, err := projects.Create(context.Background(), project.CreateInput{Name: "Sequential novel", Type: project.TypeNovel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := novel.ID
 	nodes := make([]project.ContentNode, 0, 2)
 	for index, title := range []string{"chapter one", "chapter two"} {
 		node, err := projects.CreateNode(context.Background(), projectID, project.CreateNodeInput{NodeType: "CHAPTER", Title: title, Position: index + 1})
@@ -373,7 +376,9 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 		}
 		nodes = append(nodes, node)
 	}
-	body, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "write", "windowSize": 1})
+	// NOVEL requests must remain sequential even when the caller asks for a
+	// wider window, otherwise chapter two cannot receive chapter one's output.
+	body, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "write", "windowSize": 3})
 	createdResponse := httptest.NewRecorder()
 	handler.ServeHTTP(createdResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/batch-generation-tasks", bytes.NewReader(body)))
 	var created task.Task
@@ -421,7 +426,7 @@ func TestBatchGenerationRetryKeepsCompletedDocuments(t *testing.T) {
 	if !strings.Contains(provider.requests[2].Messages[1].Content, "generated body 1") || !strings.Contains(provider.requests[2].Messages[1].Content, "<previous-chapter>") {
 		t.Fatal("retried second chapter did not receive the completed previous chapter as continuity context")
 	}
-	forceBody, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "rewrite all", "windowSize": 1, "force": true})
+	forceBody, _ := json.Marshal(map[string]any{"nodeIds": []string{nodes[0].ID, nodes[1].ID}, "instruction": "rewrite all", "windowSize": 3, "force": true})
 	forceResponse := httptest.NewRecorder()
 	handler.ServeHTTP(forceResponse, httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/batch-generation-tasks", bytes.NewReader(forceBody)))
 	var forced task.Task

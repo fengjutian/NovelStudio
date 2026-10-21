@@ -30,14 +30,14 @@ func (o Operation) Valid() bool {
 }
 
 type Request struct {
-	Operation   Operation  `json:"operation"`
-	ProjectType string     `json:"projectType"`
-	TypePrompt  string     `json:"typePrompt,omitempty"`
-	Instruction string     `json:"instruction"`
-	Content     string     `json:"content,omitempty"`
-	Evidence    []Evidence `json:"evidence,omitempty"`
-	ProjectID   string     `json:"projectId,omitempty"`
-	TaskID      string     `json:"taskId,omitempty"`
+	Operation   Operation       `json:"operation"`
+	ProjectType string          `json:"projectType"`
+	TypePrompt  string          `json:"typePrompt,omitempty"`
+	Instruction string          `json:"instruction"`
+	Content     string          `json:"content,omitempty"`
+	Evidence    []Evidence      `json:"evidence,omitempty"`
+	ProjectID   string          `json:"projectId,omitempty"`
+	TaskID      string          `json:"taskId,omitempty"`
 	Manifest    ContextManifest `json:"contextManifest,omitempty"`
 }
 
@@ -49,16 +49,16 @@ type Evidence struct {
 }
 
 type Result struct {
-	Content       string    `json:"content"`
-	Operation     Operation `json:"operation"`
-	PromptVersion string    `json:"promptVersion"`
-	Provider      string    `json:"provider"`
-	Model         string    `json:"model"`
-	RequestID     string    `json:"requestId,omitempty"`
-	InputTokens   int       `json:"inputTokens"`
-	OutputTokens  int       `json:"outputTokens"`
-	LatencyMs     int64     `json:"latencyMs"`
-	EvidenceIDs   []string  `json:"evidenceIds"`
+	Content         string          `json:"content"`
+	Operation       Operation       `json:"operation"`
+	PromptVersion   string          `json:"promptVersion"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	RequestID       string          `json:"requestId,omitempty"`
+	InputTokens     int             `json:"inputTokens"`
+	OutputTokens    int             `json:"outputTokens"`
+	LatencyMs       int64           `json:"latencyMs"`
+	EvidenceIDs     []string        `json:"evidenceIds"`
 	ContextManifest ContextManifest `json:"contextManifest"`
 }
 
